@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import App from "next/app";
 import AppHeader from "./_components/AppHeader";
+import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,8 +30,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-       <AppHeader />
-        {children}
+        <AppRouterCacheProvider>
+          <AppHeader />
+          {children}
+        </AppRouterCacheProvider>
       </body>
     </html>
   );
