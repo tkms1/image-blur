@@ -1,0 +1,79 @@
+# docker-compose.yml
+# version: "3.3"
+
+services:
+  # playwright:
+  #   build:
+  #     context: .
+  #     dockerfile: "./playwright/Dockerfile"
+  #   ports:
+  #     - "9323:9323"
+  #     - "8010:8010"
+  #   volumes:
+  #     - ./playwright:/app
+  #     - /app/node_modules
+  #   networks:
+  #     fixed_compose_network:
+  #       ipv4_address: 10.254.249.92
+  # supabase:
+  #   build:
+  #     context: .
+  #     dockerfile: "./supabase/Dockerfile.supabase"
+  #   image: supabase/studio:2025.05.19-sha-3487831
+  #   container_name: supabase-studio
+  #   volumes:
+  #     - ./supabase:/app
+  #   ports:
+  #     - "8081:3000"
+  #   networks:
+  #     fixed_compose_network:
+  #       ipv4_address: 10.254.249.93
+  # golang:
+  #   build:
+  #     context: .
+  #     dockerfile: ./golang/Dockerfile.golang
+  #   ports:
+  #     - 8080:8080
+  #   volumes:
+  #     - ./golang:/app
+  #   environment:
+  #     - EGOV_API_URL
+  #     - POSTGRES_HOST
+  #     - POSTGRES_USER
+  #     - POSTGRES_PASSWORD
+  #     - POSTGRES_DB
+  #   networks:
+  #     fixed_compose_network:
+  #       ipv4_address: 10.254.249.91
+  frontend:
+    build:
+      context: .
+      dockerfile: "./frontend/Dockerfile.next"
+    volumes:
+      - ./frontend:/frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_APP_API_URL_8080
+      - NEXT_PUBLIC_BASE_URL
+      - NEXT_PUBLIC_APP_COGNITO_POOLS_ID
+      - NEXT_PUBLIC_APP_COGNITO_CLIENT_ID
+      - NEXT_PUBLIC_APP_COGNITO_DOMAIN
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - REGION
+      - S3_BUCKET_NAME
+      - NEXT_PUBLIC_YOUTUBE_API_KEY
+      - NEXT_PUBLIC_SUPABASE_URL
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY
+      - NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY
+    # networks:
+    #   fixed_compose_network:
+    #     ipv4_address: 10.254.249.90
+
+# networks:
+#   fixed_compose_network:
+#     ipam:
+#       driver: default
+#       config:
+#         - subnet: 10.254.249.0/24

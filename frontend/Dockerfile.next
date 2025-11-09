@@ -1,0 +1,29 @@
+# FROM node:22.13.1-bookworm
+FROM node:21.7.3-bookworm
+# FROM node:21.7.3-bookworm
+# FROM node:21.7.3-alpine3.20
+
+ENV PROJECT /frontend
+
+WORKDIR ${PROJECT}
+
+
+
+COPY .${PROJECT} ${PROJECT}
+
+RUN npm cache verify
+
+RUN npm install
+
+
+
+
+CMD ["npm", "run", "dev"]
+
+# # npm run buildをする
+# # npm install serveをする
+# # CMD ["npx", "serve", "-s", "build"]
+
+
+# # RUN npm run build
+# CMD ["npm", "run", "start"]
