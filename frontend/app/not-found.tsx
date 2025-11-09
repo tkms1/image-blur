@@ -7,7 +7,7 @@ import Typography from "@mui/material/Typography";
 import Button from "@mui/material/Button";
 import Paper from "@mui/material/Paper";
 // import SearchIcon from "@mui/icons-material/Search";
-import Link from "next/link";
+// import Link from "next/link";
 // import { useState } from "react";
 import Box from "@mui/material/Box";
 // import IconButton from "@mui/material/IconButton";
@@ -135,7 +135,7 @@ export default function NotFound() {
 
           {/* Back to Home Button */}
           <Button
-            component={Link}
+            // component={Link}
             href="/"
             variant="outlined"
             sx={{
