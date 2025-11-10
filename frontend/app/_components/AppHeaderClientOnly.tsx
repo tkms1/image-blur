@@ -46,8 +46,8 @@ export default function AppHeaderClientOnly() {
           alignItems: "center",
         }}
       >
-        <Typography variant="h6">
-          <Link href="/" className="no-underline text-white">
+        <Typography variant="h6" >
+          <Link href="/" className="no-underline text-white flex">
             <Image
               src="/top-image.png"
               width={50}
@@ -55,6 +55,7 @@ export default function AppHeaderClientOnly() {
               alt="logo"
               priority
             />
+            画像ぼかし
           </Link>
         </Typography>
 

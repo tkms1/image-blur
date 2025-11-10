@@ -28,14 +28,39 @@ export default function BlurEditorPage() {
   const [imageUrlInput, setImageUrlInput] = useState("");
   const [fileError, setFileError] = useState<string | null>(null);
   const [blurRegions, setBlurRegions] = useState<BlurRegion[]>([]);
-  const [blurRadius, setBlurRadius] = useState(50);
+  const [blurRadius, setBlurRadius] = useState(30);
   const [blurStrength, setBlurStrength] = useState(10);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [undoStack, setUndoStack] = useState<BlurRegion[][]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const canvasRef = useRef<BlurCanvasRef>(null); // ✅ BlurCanvas の ref
+  const canvasRef = useRef<BlurCanvasRef>(null);
 
-  // 画像アップロード（変更なし）
+  const pushToUndoStack = () => {
+    setUndoStack((prev) => [...prev, blurRegions]);
+  };
+
+  const undo = () => {
+    if (undoStack.length === 0) return;
+    const previous = undoStack[undoStack.length - 1];
+    setBlurRegions(previous);
+    setUndoStack((prev) => prev.slice(0, -1));
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [undoStack]);
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -47,6 +72,7 @@ export default function BlurEditorPage() {
     reader.onload = () => {
       setImageSrc(reader.result as string);
       setBlurRegions([]);
+      setUndoStack([]);
       setFileError(null);
     };
     reader.onerror = () => setFileError("読み込み失敗");
@@ -57,10 +83,12 @@ export default function BlurEditorPage() {
     if (imageUrlInput) {
       setImageSrc(imageUrlInput);
       setBlurRegions([]);
+      setUndoStack([]);
     }
   };
 
   const addBlurRegion = (x: number, y: number) => {
+    pushToUndoStack();
     setBlurRegions((prev) => [
       ...prev,
       {
@@ -78,6 +106,7 @@ export default function BlurEditorPage() {
     start: { x: number; y: number },
     end: { x: number; y: number }
   ) => {
+    pushToUndoStack();
     setBlurRegions((prev) => [
       ...prev,
       {
@@ -94,24 +123,38 @@ export default function BlurEditorPage() {
   };
 
   const updateBlurRegion = (id: string, updates: Partial<BlurRegion>) => {
+    pushToUndoStack();
     setBlurRegions((prev) =>
       prev.map((r) => (r.id === id ? { ...r, ...updates } : r))
     );
   };
 
   const removeBlurRegion = (id: string) => {
+    pushToUndoStack();
     setBlurRegions((prev) => prev.filter((r) => r.id !== id));
   };
 
-  const clearAll = () => setBlurRegions([]);
+  const clearAll = () => {
+    if (blurRegions.length === 0) return;
+    pushToUndoStack();
+    setBlurRegions([]);
+  };
 
-  // ✅ ダウンロード処理
+  // ✅【新】画像を変更：編集画面 → 選択画面へ戻る
+  const restartWithNewImage = () => {
+    setImageSrc(null);
+    setImageUrlInput("");
+    setBlurRegions([]);
+    setUndoStack([]);
+    setFileError(null);
+    // 必要なら input をクリア（UI同期のため）
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleDownload = async () => {
     if (!canvasRef.current || !imageSrc) return;
 
     setIsProcessing(true);
-
-    // 少し待って canvas の再描画を保証（React のレンダリングサイクル）
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     const dataUrl = canvasRef.current.exportImage();
@@ -122,7 +165,6 @@ export default function BlurEditorPage() {
       return;
     }
 
-    // ダウンロード実行
     const link = document.createElement("a");
     link.href = dataUrl;
     link.download = `blurred-image-${new Date()
@@ -136,10 +178,6 @@ export default function BlurEditorPage() {
 
   return (
     <Box sx={{ p: 3, maxWidth: 1200, mx: "auto" }} suppressHydrationWarning>
-      <Typography variant="h4" gutterBottom>
-        クリックで円形ぼかし、ドラッグで線状ぼかし（サイズ固定）
-      </Typography>
-
       {!imageSrc ? (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mb: 4 }}>
           <Button variant="contained" component="label">
@@ -176,9 +214,15 @@ export default function BlurEditorPage() {
             onClearAll={clearAll}
           />
 
-          {/* ✅ ダウンロードボタン */}
+          {/* ボタン群 */}
           <Box
-            sx={{ mt: 2, display: "flex", justifyContent: "center", gap: 2 }}
+            sx={{
+              mt: 2,
+              display: "flex",
+              justifyContent: "center",
+              gap: 2,
+              flexWrap: "wrap",
+            }}
           >
             <Button
               variant="contained"
@@ -193,13 +237,31 @@ export default function BlurEditorPage() {
             >
               {isProcessing ? "生成中..." : "ダウンロード"}
             </Button>
-            <Button variant="outlined" color="secondary" onClick={clearAll}>
+
+            <Button
+              variant="outlined"
+              onClick={undo}
+              disabled={undoStack.length === 0}
+            >
+              元に戻す
+            </Button>
+
+            {/* <Button variant="outlined" onClick={clearAll}>
               全てクリア
+            </Button> */}
+
+            {/* ✅【新】画像を変更ボタン */}
+            <Button
+              variant="outlined"
+              color="info"
+              onClick={restartWithNewImage}
+              // sx={{ minWidth: 140 }}
+            >
+              画像を変更
             </Button>
           </Box>
 
           <Box sx={{ mt: 3, display: "flex", justifyContent: "center" }}>
-            {/* ✅ ref で BlurCanvas を参照 */}
             <BlurCanvas
               ref={canvasRef}
               imageSrc={imageSrc}

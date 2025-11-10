@@ -24,8 +24,8 @@ export default function BlurControls({
         <Slider
           value={blurRadius}
           min={10}
-          max={200}
-          step={5}
+          max={50}
+          step={1}
           onChange={(_, v) => onRadiusChange(v as number)}
         />
       </Box>
