@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Fragment } from "react";
 import {
   Box,
   Button,
@@ -32,9 +32,20 @@ export default function BlurEditorPage() {
   const [blurStrength, setBlurStrength] = useState(10);
   const [isProcessing, setIsProcessing] = useState(false);
   const [undoStack, setUndoStack] = useState<BlurRegion[][]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isDraggingOnCanvas, setIsDraggingOnCanvas] = useState(false);
+
+  // ✅ プレビューサークル用 state/ref
+  const [previewCircle, setPreviewCircle] = useState<{
+    radius: number;
+    visible: boolean;
+  } | null>(null);
+  const previewTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<BlurCanvasRef>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+  const canvasDropZoneRef = useRef<HTMLDivElement>(null);
 
   const pushToUndoStack = () => {
     setUndoStack((prev) => [...prev, blurRegions]);
@@ -61,9 +72,23 @@ export default function BlurEditorPage() {
     };
   }, [undoStack]);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // ✅ プレビュークリーンアップ（アンマウント時）
+  useEffect(() => {
+    return () => {
+      if (previewTimeoutRef.current) {
+        clearTimeout(previewTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const loadNewImage = (file: File) => {
+    // タイマークリア（画像変更時はプレビュー不要）
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current);
+      previewTimeoutRef.current = null;
+    }
+    setPreviewCircle(null);
+
     if (!file.type.match("image.*")) {
       setFileError("画像ファイルを選択してください。");
       return;
@@ -74,19 +99,85 @@ export default function BlurEditorPage() {
       setBlurRegions([]);
       setUndoStack([]);
       setFileError(null);
+      setIsDragging(false);
+      setIsDraggingOnCanvas(false);
     };
-    reader.onerror = () => setFileError("読み込み失敗");
+    reader.onerror = () => {
+      setFileError("読み込み失敗");
+      setIsDragging(false);
+      setIsDraggingOnCanvas(false);
+    };
     reader.readAsDataURL(file);
   };
 
-  const handleImageUrlSubmit = () => {
-    if (imageUrlInput) {
-      setImageSrc(imageUrlInput);
-      setBlurRegions([]);
-      setUndoStack([]);
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) loadNewImage(file);
+  };
+
+  // --- 初期画面：Drop Zone ---
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragging) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (
+      dropZoneRef.current &&
+      !dropZoneRef.current.contains(e.relatedTarget as Node)
+    ) {
+      setIsDragging(false);
     }
   };
 
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      loadNewImage(files[0]);
+    } else {
+      setFileError("画像ファイルをドロップしてください。");
+    }
+  };
+
+  // --- 編集画面：Canvas Drop Zone ---
+  const handleCanvasDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDraggingOnCanvas) setIsDraggingOnCanvas(true);
+  };
+
+  const handleCanvasDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (
+      canvasDropZoneRef.current &&
+      !canvasDropZoneRef.current.contains(e.relatedTarget as Node)
+    ) {
+      setIsDraggingOnCanvas(false);
+    }
+  };
+
+  const handleCanvasDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOnCanvas(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      loadNewImage(files[0]);
+    } else {
+      setFileError("画像ファイルをドロップしてください。");
+    }
+  };
+
+  // --- Blur操作 ---
   const addBlurRegion = (x: number, y: number) => {
     pushToUndoStack();
     setBlurRegions((prev) => [
@@ -140,17 +231,6 @@ export default function BlurEditorPage() {
     setBlurRegions([]);
   };
 
-  // ✅【新】画像を変更：編集画面 → 選択画面へ戻る
-  const restartWithNewImage = () => {
-    setImageSrc(null);
-    setImageUrlInput("");
-    setBlurRegions([]);
-    setUndoStack([]);
-    setFileError(null);
-    // 必要なら input をクリア（UI同期のため）
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
   const handleDownload = async () => {
     if (!canvasRef.current || !imageSrc) return;
 
@@ -176,11 +256,61 @@ export default function BlurEditorPage() {
     document.body.removeChild(link);
   };
 
+  // ✅ ぼかしサイズ変更時のプレビュー表示
+  const handleRadiusChange = (value: number) => {
+    setBlurRadius(value);
+
+    // 前のタイマーをクリア
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current);
+    }
+
+    // 新たに表示
+    setPreviewCircle({ radius: value, visible: true });
+
+    // 3秒後に非表示
+    previewTimeoutRef.current = setTimeout(() => {
+      setPreviewCircle(null);
+      previewTimeoutRef.current = null;
+    }, 3000);
+  };
+
   return (
     <Box sx={{ p: 3, maxWidth: 1200, mx: "auto" }} suppressHydrationWarning>
       {!imageSrc ? (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mb: 4 }}>
-          <Button variant="contained" component="label">
+        <Box
+          ref={dropZoneRef}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            mb: 4,
+            p: 4,
+            border: isDragging ? "2px dashed #1976d2" : "2px dashed #ccc",
+            borderRadius: 2,
+            backgroundColor: isDragging
+              ? "rgba(25, 118, 210, 0.04)"
+              : "transparent",
+            transition: "all 0.2s ease",
+          }}
+        >
+          <Typography variant="body1" align="center" color="text.secondary">
+            {isDragging
+              ? "ここにドロップして画像を読み込み 📤"
+              : "画像をドラッグ＆ドロップするか、"}
+          </Typography>
+
+          <Button
+            variant="contained"
+            component="label"
+            onClick={() => {
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }}
+            sx={{ alignSelf: "center" }}
+          >
             画像を選択
             <input
               type="file"
@@ -190,78 +320,111 @@ export default function BlurEditorPage() {
               ref={fileInputRef}
             />
           </Button>
-          <Box sx={{ display: "flex", gap: 1 }}>
-            <TextField
-              label="画像URL"
-              size="small"
-              value={imageUrlInput}
-              onChange={(e) => setImageUrlInput(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleImageUrlSubmit()}
-            />
-            <Button variant="outlined" onClick={handleImageUrlSubmit}>
-              読み込み
-            </Button>
-          </Box>
+
           {fileError && <Alert severity="error">{fileError}</Alert>}
         </Box>
       ) : (
         <>
-          <BlurControls
-            blurRadius={blurRadius}
-            blurStrength={blurStrength}
-            onRadiusChange={setBlurRadius}
-            onStrengthChange={setBlurStrength}
-            onClearAll={clearAll}
-          />
+          <Box className="flex">
+            <BlurControls
+              blurRadius={blurRadius}
+              blurStrength={blurStrength}
+              onRadiusChange={handleRadiusChange} // ✅ 変更
+              onStrengthChange={setBlurStrength}
+              onClearAll={clearAll}
+            />
 
-          {/* ボタン群 */}
-          <Box
-            sx={{
-              mt: 2,
-              display: "flex",
-              justifyContent: "center",
-              gap: 2,
-              flexWrap: "wrap",
-            }}
-          >
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={handleDownload}
-              disabled={blurRegions.length === 0 || isProcessing}
-              startIcon={
-                isProcessing ? (
-                  <CircularProgress size={20} color="inherit" />
-                ) : null
-              }
+            <Box
+              sx={{
+                mt: 2,
+                ml: 2,
+                display: "flex",
+                justifyContent: "center",
+                gap: 2,
+                flexWrap: "wrap",
+              }}
             >
-              {isProcessing ? "生成中..." : "ダウンロード"}
-            </Button>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleDownload}
+                disabled={blurRegions.length === 0 || isProcessing}
+                startIcon={
+                  isProcessing ? (
+                    <CircularProgress size={20} color="inherit" />
+                  ) : null
+                }
+              >
+                {isProcessing ? "生成中..." : "ダウンロード"}
+              </Button>
 
-            <Button
-              variant="outlined"
-              onClick={undo}
-              disabled={undoStack.length === 0}
-            >
-              元に戻す
-            </Button>
+              <Button
+                variant="outlined"
+                onClick={undo}
+                disabled={undoStack.length === 0}
+              >
+                元に戻す
+              </Button>
 
-            {/* <Button variant="outlined" onClick={clearAll}>
-              全てクリア
-            </Button> */}
-
-            {/* ✅【新】画像を変更ボタン */}
-            <Button
-              variant="outlined"
-              color="info"
-              onClick={restartWithNewImage}
-              // sx={{ minWidth: 140 }}
-            >
-              画像を変更
-            </Button>
+              <Button
+                variant="contained"
+                component="label"
+                onClick={() => {
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+              >
+                画像を変更
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  ref={fileInputRef}
+                />
+              </Button>
+            </Box>
           </Box>
 
-          <Box sx={{ mt: 3, display: "flex", justifyContent: "center" }}>
+          <Box
+            ref={canvasDropZoneRef}
+            onDragOver={handleCanvasDragOver}
+            onDragLeave={handleCanvasDragLeave}
+            onDrop={handleCanvasDrop}
+            sx={{
+              mt: 3,
+              display: "flex",
+              justifyContent: "center",
+              outline: isDraggingOnCanvas ? "2px dashed #1976d2" : "none",
+              borderRadius: 1,
+              p: isDraggingOnCanvas ? 2 : 0,
+              backgroundColor: isDraggingOnCanvas
+                ? "rgba(25, 118, 210, 0.04)"
+                : "transparent",
+              transition: "all 0.2s ease",
+              position: "relative",
+            }}
+          >
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{
+                position: "absolute",
+                top: 8,
+                left: "50%",
+                transform: "translateX(-50%)",
+                opacity: isDraggingOnCanvas ? 1 : 0,
+                transition: "opacity 0.2s",
+                pointerEvents: "none",
+                zIndex: 10,
+                bgcolor: "rgba(255,255,255,0.8)",
+                px: 1,
+                py: 0.5,
+                borderRadius: 1,
+              }}
+            >
+              ここにドロップして画像を変更 🔄
+            </Typography>
+
             <BlurCanvas
               ref={canvasRef}
               imageSrc={imageSrc}
@@ -273,6 +436,29 @@ export default function BlurEditorPage() {
             />
           </Box>
         </>
+      )}
+
+      {/* ✅ ぼかしサイズ変更時のプレビュー円（画面中央に表示） */}
+      {previewCircle && (
+        <Box
+          sx={{
+            position: "fixed",
+            top: "20%",
+            left: "10%",
+            transform: `translate(-50%, -50%) scale(${
+              previewCircle.visible ? 1 : 0.9
+            })`,
+            width: previewCircle.radius * 2,
+            height: previewCircle.radius * 2,
+            borderRadius: "50%",
+            border: "2px dashed #1976d2",
+            backgroundColor: "rgba(25, 118, 210, 0.08)",
+            pointerEvents: "none",
+            zIndex: 1300, // Modal/Drawerより上
+            opacity: previewCircle.visible ? 1 : 0,
+            transition: "opacity 0.3s ease, transform 0.3s ease",
+          }}
+        />
       )}
     </Box>
   );
