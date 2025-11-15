@@ -51,26 +51,26 @@ const AppHeaderClientBlur = ({
   isProcessing,
 }: Props) => {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
+  // const searchParams = useSearchParams();
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
 
-  const existingRedirectTo = searchParams.get("redirect_to");
-  const targetUrl =
-    existingRedirectTo ||
-    `${pathname}${
-      searchParams.toString() ? `?${searchParams.toString()}` : ""
-    }`;
+  // const existingRedirectTo = searchParams.get("redirect_to");
+  // const targetUrl =
+  //   existingRedirectTo ||
+  //   `${pathname}${
+  //     searchParams.toString() ? `?${searchParams.toString()}` : ""
+  //   }`;
 
-  const loginLink =
-    targetUrl === "/"
-      ? "/login"
-      : `/login?redirect_to=${encodeURIComponent(targetUrl)}`;
-  const signupLink =
-    targetUrl === "/"
-      ? "/signup"
-      : `/signup?redirect_to=${encodeURIComponent(targetUrl)}`;
+  // const loginLink =
+  //   targetUrl === "/"
+  //     ? "/login"
+  //     : `/login?redirect_to=${encodeURIComponent(targetUrl)}`;
+  // const signupLink =
+  //   targetUrl === "/"
+  //     ? "/signup"
+  //     : `/signup?redirect_to=${encodeURIComponent(targetUrl)}`;
 
   const navItems = [{ name: "ホーム", link: "/blur-editor" }];
 
