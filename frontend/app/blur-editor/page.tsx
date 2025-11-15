@@ -11,7 +11,13 @@ import {
 } from "@mui/material";
 import BlurCanvas, { BlurCanvasRef } from "./BlurCanvas";
 import BlurControls from "./BlurControls";
-
+import UndoIcon from "@mui/icons-material/Undo";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip"; // 👈 追加
+import DownloadIcon from "@mui/icons-material/Download";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
+import AppHeaderClientOnly from "../_components/AppHeaderClientOnly";
+import AppHeaderClientBlur from "../_components/AppHeaderClientBlur";
 type BlurRegion = {
   id: string;
   type: "circle" | "line";
@@ -274,44 +280,127 @@ export default function BlurEditorPage() {
       previewTimeoutRef.current = null;
     }, 3000);
   };
-
+  const uploadImage = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  };
   return (
-    <Box sx={{ p: 3, maxWidth: 1200, mx: "auto" }} suppressHydrationWarning>
-      {!imageSrc ? (
-        <Box
-          ref={dropZoneRef}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-            mb: 4,
-            p: 4,
-            border: isDragging ? "2px dashed #1976d2" : "2px dashed #ccc",
-            borderRadius: 2,
-            backgroundColor: isDragging
-              ? "rgba(25, 118, 210, 0.04)"
-              : "transparent",
-            transition: "all 0.2s ease",
-          }}
-        >
-          <Typography variant="body1" align="center" color="text.secondary">
-            {isDragging
-              ? "ここにドロップして画像を読み込み 📤"
-              : "画像をドラッグ＆ドロップするか、"}
-          </Typography>
-
-          <Button
-            variant="contained"
-            component="label"
-            onClick={() => {
-              if (fileInputRef.current) fileInputRef.current.value = "";
+    <>
+      <AppHeaderClientBlur
+        undo={undo}
+        undoStack={undoStack}
+        blurRegions={blurRegions}
+        handleDownload={handleDownload}
+        uploadImage={uploadImage}
+        isProcessing={isProcessing}
+      />
+      <Box sx={{ p: 3, maxWidth: 1200, mx: "auto" }} suppressHydrationWarning>
+        {!imageSrc ? (
+          <Box
+            ref={dropZoneRef}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              mb: 4,
+              p: 4,
+              border: isDragging ? "2px dashed #1976d2" : "2px dashed #ccc",
+              borderRadius: 2,
+              backgroundColor: isDragging
+                ? "rgba(25, 118, 210, 0.04)"
+                : "transparent",
+              transition: "all 0.2s ease",
             }}
-            sx={{ alignSelf: "center" }}
           >
-            画像を選択
+            <Typography variant="body1" align="center" color="text.secondary">
+              {isDragging
+                ? "ここにドロップして画像を読み込み 📤"
+                : "画像をドラッグ＆ドロップするか、"}
+            </Typography>
+
+            <Button
+              variant="contained"
+              component="label"
+              onClick={() => {
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+              sx={{ alignSelf: "center" }}
+            >
+              画像を選択
+              <input
+                type="file"
+                hidden
+                accept="image/*"
+                onChange={handleImageUpload}
+                ref={fileInputRef}
+              />
+            </Button>
+
+            {fileError && <Alert severity="error">{fileError}</Alert>}
+          </Box>
+        ) : (
+          <>
+            <Box sx={{ mb: 2 }}>
+              <BlurControls
+                blurRadius={blurRadius}
+                blurStrength={blurStrength}
+                onRadiusChange={handleRadiusChange}
+                onStrengthChange={setBlurStrength}
+                onClearAll={clearAll}
+              />
+            </Box>
+
+            {/* 👇 コントロールバー：BlurCanvas の外（上 or 下） */}
+            {/* <Box
+            sx={{
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: 1,
+              mb: 2,
+            }}
+          >
+            <Tooltip title="もとに戻す" arrow>
+              <IconButton
+                aria-label="元に戻す"
+                onClick={undo}
+                disabled={undoStack.length === 0}
+              >
+                <UndoIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="ダウンロード" arrow>
+              <IconButton
+                aria-label="ダウンロード"
+                onClick={handleDownload}
+                disabled={blurRegions.length === 0 || isProcessing}
+              >
+                {isProcessing ? (
+                  <CircularProgress size={24} color="inherit" />
+                ) : (
+                  <DownloadIcon />
+                )}
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="画像を変更" arrow>
+              <IconButton
+                aria-label="画像を変更"
+                onClick={() => {
+                  uploadImage();
+                }}
+              >
+                <UploadFileIcon />
+              </IconButton>
+            </Tooltip>
+          </Box> */}
+
+            {/* 隠し input（どこか1か所あればOK） */}
             <input
               type="file"
               hidden
@@ -319,147 +408,89 @@ export default function BlurEditorPage() {
               onChange={handleImageUpload}
               ref={fileInputRef}
             />
-          </Button>
 
-          {fileError && <Alert severity="error">{fileError}</Alert>}
-        </Box>
-      ) : (
-        <>
-          <Box className="flex">
-            <BlurControls
-              blurRadius={blurRadius}
-              blurStrength={blurStrength}
-              onRadiusChange={handleRadiusChange} // ✅ 変更
-              onStrengthChange={setBlurStrength}
-              onClearAll={clearAll}
-            />
-
+            {/* BlurCanvas */}
             <Box
+              ref={canvasDropZoneRef}
+              onDragOver={handleCanvasDragOver}
+              onDragLeave={handleCanvasDragLeave}
+              onDrop={handleCanvasDrop}
               sx={{
-                mt: 2,
-                ml: 2,
                 display: "flex",
                 justifyContent: "center",
-                gap: 2,
-                flexWrap: "wrap",
+                outline: isDraggingOnCanvas ? "2px dashed #1976d2" : "none",
+                borderRadius: 1,
+                p: isDraggingOnCanvas ? 2 : 0,
+                backgroundColor: isDraggingOnCanvas
+                  ? "rgba(25, 118, 210, 0.04)"
+                  : "transparent",
+                transition: "all 0.2s ease",
+                position: "relative",
               }}
             >
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handleDownload}
-                disabled={blurRegions.length === 0 || isProcessing}
-                startIcon={
-                  isProcessing ? (
-                    <CircularProgress size={20} color="inherit" />
-                  ) : null
-                }
-              >
-                {isProcessing ? "生成中..." : "ダウンロード"}
-              </Button>
-
-              <Button
-                variant="outlined"
-                onClick={undo}
-                disabled={undoStack.length === 0}
-              >
-                元に戻す
-              </Button>
-
-              <Button
-                variant="contained"
-                component="label"
-                onClick={() => {
-                  if (fileInputRef.current) fileInputRef.current.value = "";
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{
+                  position: "absolute",
+                  top: 8,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  opacity: isDraggingOnCanvas ? 1 : 0,
+                  transition: "opacity 0.2s",
+                  pointerEvents: "none",
+                  zIndex: 10,
+                  bgcolor: "rgba(255,255,255,0.8)",
+                  px: 1,
+                  py: 0.5,
+                  borderRadius: 1,
                 }}
               >
-                画像を変更
-                <input
-                  type="file"
-                  hidden
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  ref={fileInputRef}
-                />
-              </Button>
+                ここにドロップして画像を変更 🔄
+              </Typography>
+
+              <BlurCanvas
+                ref={canvasRef}
+                imageSrc={imageSrc}
+                blurRegions={blurRegions}
+                onAddBlur={addBlurRegion}
+                onAddLineBlur={addLineBlurRegion}
+                onUpdateBlur={updateBlurRegion}
+                onRemoveBlur={removeBlurRegion}
+                handleDownload={handleDownload}
+                undo={undo}
+                undoStack={undoStack}
+                isProcessing={isProcessing}
+                uploadImage={uploadImage}
+                // fileInputRef={fileInputRef}
+              />
             </Box>
-          </Box>
+          </>
+        )}
 
+        {/* ✅ ぼかしサイズ変更時のプレビュー円（画面中央に表示） */}
+        {previewCircle && (
           <Box
-            ref={canvasDropZoneRef}
-            onDragOver={handleCanvasDragOver}
-            onDragLeave={handleCanvasDragLeave}
-            onDrop={handleCanvasDrop}
             sx={{
-              mt: 3,
-              display: "flex",
-              justifyContent: "center",
-              outline: isDraggingOnCanvas ? "2px dashed #1976d2" : "none",
-              borderRadius: 1,
-              p: isDraggingOnCanvas ? 2 : 0,
-              backgroundColor: isDraggingOnCanvas
-                ? "rgba(25, 118, 210, 0.04)"
-                : "transparent",
-              transition: "all 0.2s ease",
-              position: "relative",
+              position: "fixed",
+              top: { xs: "20%", sm: "40%" }, // 画面中央"20%",
+              left: { xs: "20%", sm: "20%" },
+              transform: `translate(-50%, -50%) scale(${
+                previewCircle.visible ? 1 : 0.9
+              })`,
+              width: previewCircle.radius * 2,
+              height: previewCircle.radius * 2,
+              borderRadius: "50%",
+              border: "2px dashed #1976d2",
+              backgroundColor: "rgba(25, 118, 210, 0.08)",
+              pointerEvents: "none",
+              zIndex: 1300, // Modal/Drawerより上
+              opacity: previewCircle.visible ? 1 : 0,
+              transition: "opacity 0.3s ease, transform 0.3s ease",
             }}
-          >
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{
-                position: "absolute",
-                top: 8,
-                left: "50%",
-                transform: "translateX(-50%)",
-                opacity: isDraggingOnCanvas ? 1 : 0,
-                transition: "opacity 0.2s",
-                pointerEvents: "none",
-                zIndex: 10,
-                bgcolor: "rgba(255,255,255,0.8)",
-                px: 1,
-                py: 0.5,
-                borderRadius: 1,
-              }}
-            >
-              ここにドロップして画像を変更 🔄
-            </Typography>
-
-            <BlurCanvas
-              ref={canvasRef}
-              imageSrc={imageSrc}
-              blurRegions={blurRegions}
-              onAddBlur={addBlurRegion}
-              onAddLineBlur={addLineBlurRegion}
-              onUpdateBlur={updateBlurRegion}
-              onRemoveBlur={removeBlurRegion}
-            />
-          </Box>
-        </>
-      )}
-
-      {/* ✅ ぼかしサイズ変更時のプレビュー円（画面中央に表示） */}
-      {previewCircle && (
-        <Box
-          sx={{
-            position: "fixed",
-            top: "20%",
-            left: "10%",
-            transform: `translate(-50%, -50%) scale(${
-              previewCircle.visible ? 1 : 0.9
-            })`,
-            width: previewCircle.radius * 2,
-            height: previewCircle.radius * 2,
-            borderRadius: "50%",
-            border: "2px dashed #1976d2",
-            backgroundColor: "rgba(25, 118, 210, 0.08)",
-            pointerEvents: "none",
-            zIndex: 1300, // Modal/Drawerより上
-            opacity: previewCircle.visible ? 1 : 0,
-            transition: "opacity 0.3s ease, transform 0.3s ease",
-          }}
-        />
-      )}
-    </Box>
+          />
+        )}
+      </Box>
+    </>
   );
 }
