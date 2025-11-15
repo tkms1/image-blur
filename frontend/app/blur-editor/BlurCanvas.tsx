@@ -8,6 +8,12 @@ import {
   useImperativeHandle,
 } from "react";
 import Box from "@mui/material/Box";
+import UndoIcon from "@mui/icons-material/Undo";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip"; // 👈 追加
+import DownloadIcon from "@mui/icons-material/Download";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
+import type { Ref } from "react"; // 👈 追加
 
 type BlurRegion = {
   id: string;
@@ -34,6 +40,13 @@ type Props = {
   ) => void;
   onUpdateBlur: (id: string, updates: Partial<BlurRegion>) => void;
   onRemoveBlur: (id: string) => void;
+  handleDownload: () => void;
+  undo: () => void;
+  undoStack: BlurRegion[][];
+  isProcessing: boolean;
+  uploadImage: () => void;
+  // fileInputRef: React.RefObject<HTMLInputElement>; // ✅ 明示的に RefObject
+  // blurRegions: BlurRegion[];
 };
 
 const getCanvasCoordinates = (
@@ -56,10 +69,16 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
     {
       imageSrc,
       blurRegions,
+      undoStack,
+      isProcessing,
+      // fileInputRef,
+      uploadImage,
       onAddBlur,
       onAddLineBlur,
       onUpdateBlur,
       onRemoveBlur,
+      handleDownload,
+      undo,
     },
     ref
   ) => {
@@ -228,7 +247,7 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
     return (
       <Box
         sx={{
-          position: "relative",
+          // position: "relative",
           display: "inline-block",
           border: "1px solid #eee",
           borderRadius: 1,
@@ -240,6 +259,54 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
         }}
         suppressHydrationWarning
       >
+        <Box
+          sx={{
+            // mt: 2,
+            ml: 2,
+            // display: "flex",
+            display: { xs: "none", sm: "flex" },
+            justifyContent: "flex-end",
+            alignItems: "center",
+
+            // justifyContent: "center",
+            // gap: 2,
+            flexWrap: "wrap",
+          }}
+        >
+          <Tooltip title="もとに戻す" arrow>
+            <IconButton
+              aria-label="元に戻す"
+              onClick={undo}
+              disabled={undoStack.length === 0}
+            >
+              <UndoIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="ダウンロード" arrow>
+            <IconButton
+              aria-label="ダウンロード"
+              onClick={handleDownload}
+              disabled={blurRegions.length === 0 || isProcessing}
+            >
+              <DownloadIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="画像を変更" arrow>
+            <IconButton
+              aria-label="画像を変更"
+              onClick={() => {
+                // if (fileInputRef.current) {
+                //   fileInputRef.current.value = "";
+                //   fileInputRef.current.click();
+                // }
+                uploadImage();
+              }}
+            >
+              <UploadFileIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
         <canvas
           ref={canvasRef}
           onMouseDown={handleMouseDown}
