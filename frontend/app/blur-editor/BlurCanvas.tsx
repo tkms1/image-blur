@@ -10,10 +10,10 @@ import {
 import Box from "@mui/material/Box";
 import UndoIcon from "@mui/icons-material/Undo";
 import IconButton from "@mui/material/IconButton";
-import Tooltip from "@mui/material/Tooltip";
+import Tooltip from "@mui/material/Tooltip"; // 👈 追加
 import DownloadIcon from "@mui/icons-material/Download";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import type { Ref } from "react";
+import type { Ref } from "react"; // 👈 追加
 
 type BlurRegion = {
   id: string;
@@ -27,7 +27,7 @@ type BlurRegion = {
 };
 
 export type BlurCanvasRef = {
-  exportImage: () => string | null;
+  exportImage: () => string | null; // PNG DataURL を返す
 };
 
 type Props = {
@@ -45,51 +45,25 @@ type Props = {
   undoStack: BlurRegion[][];
   isProcessing: boolean;
   uploadImage: () => void;
+  // fileInputRef: React.RefObject<HTMLInputElement>; // ✅ 明示的に RefObject
+  // blurRegions: BlurRegion[];
 };
 
-// ✅ 型ガード関数（ポイント！）
-function isTouchEvent(
-  event: React.MouseEvent | React.TouchEvent
-): event is React.TouchEvent {
-  return "touches" in event;
-}
-
-function isMouseEvent(
-  event: React.MouseEvent | React.TouchEvent
-): event is React.MouseEvent {
-  return "clientX" in event;
-}
-
-// ✅ 型安全な座標取得
-const getCanvasCoordinatesFromEvent = (
-  event: React.MouseEvent | React.TouchEvent,
+const getCanvasCoordinates = (
+  clientX: number,
+  clientY: number,
   canvas: HTMLCanvasElement
 ) => {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
-
-  let clientX: number, clientY: number;
-
-  if (isTouchEvent(event) && event.touches.length > 0) {
-    const touch = event.touches[0];
-    clientX = touch.clientX;
-    clientY = touch.clientY;
-  } else if (isMouseEvent(event)) {
-    clientX = event.clientX;
-    clientY = event.clientY;
-  } else {
-    // フォールバック（型安全性のため）
-    clientX = 0;
-    clientY = 0;
-  }
-
   return {
     x: (clientX - rect.left) * scaleX,
     y: (clientY - rect.top) * scaleY,
   };
 };
 
+// ✅ forwardRef で親にメソッドを公開
 const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
   (
     {
@@ -97,6 +71,7 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
       blurRegions,
       undoStack,
       isProcessing,
+      // fileInputRef,
       uploadImage,
       onAddBlur,
       onAddLineBlur,
@@ -109,6 +84,7 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
   ) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [image, setImage] = useState<HTMLImageElement | null>(null);
+
     const [isDrawingLine, setIsDrawingLine] = useState(false);
     const lineStart = useRef<{ x: number; y: number } | null>(null);
 
@@ -222,6 +198,7 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
       });
     }, [image, blurRegions]);
 
+    // ✅ exportImage メソッドを親に公開
     useImperativeHandle(
       ref,
       () => ({
@@ -234,59 +211,34 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
       [image]
     );
 
-    // ✅ 型安全なハンドラ
-    const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
-      if (
-        (isMouseEvent(e) && e.button !== 0) || // マウス右クリック無視
-        (isTouchEvent(e) && e.touches.length > 1) // 複数タッチ無視
-      ) {
-        return;
-      }
-
-      e.preventDefault();
+    const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (e.button !== 0) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
-
-      const { x, y } = getCanvasCoordinatesFromEvent(e, canvas);
+      const { x, y } = getCanvasCoordinates(e.clientX, e.clientY, canvas);
       lineStart.current = { x, y };
       setIsDrawingLine(true);
     };
 
-    const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
-      e.preventDefault();
-    };
+    const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {};
 
-    const handlePointerUp = (e: React.MouseEvent | React.TouchEvent) => {
-      if (!isDrawingLine || !lineStart.current) return;
+    const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (isDrawingLine && lineStart.current) {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const { x, y } = getCanvasCoordinates(e.clientX, e.clientY, canvas);
+        const start = lineStart.current;
 
-      e.preventDefault();
-      const canvas = canvasRef.current;
-      if (!canvas) return;
+        const dx = x - start.x;
+        const dy = y - start.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
 
-      const { x, y } = getCanvasCoordinatesFromEvent(e, canvas);
-      const start = lineStart.current;
+        if (distance < 5) {
+          onAddBlur(start.x, start.y);
+        } else {
+          onAddLineBlur(start, { x, y });
+        }
 
-      const dx = x - start.x;
-      const dy = y - start.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-
-      const isMobile =
-        typeof window !== "undefined" &&
-        /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
-      const distanceThreshold = isMobile ? 10 : 5;
-
-      if (distance < distanceThreshold) {
-        onAddBlur(start.x, start.y);
-      } else {
-        onAddLineBlur(start, { x, y });
-      }
-
-      lineStart.current = null;
-      setIsDrawingLine(false);
-    };
-
-    const handlePointerCancel = () => {
-      if (isDrawingLine) {
         lineStart.current = null;
         setIsDrawingLine(false);
       }
@@ -295,21 +247,29 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
     return (
       <Box
         sx={{
+          // position: "relative",
           display: "inline-block",
           border: "1px solid #eee",
           borderRadius: 1,
           overflow: "hidden",
         }}
-        onMouseLeave={handlePointerCancel}
-        onTouchCancel={handlePointerCancel}
+        onMouseLeave={() => {
+          setIsDrawingLine(false);
+          lineStart.current = null;
+        }}
         suppressHydrationWarning
       >
         <Box
           sx={{
+            // mt: 2,
             ml: 2,
+            // display: "flex",
             display: { xs: "none", sm: "flex" },
             justifyContent: "flex-end",
             alignItems: "center",
+
+            // justifyContent: "center",
+            // gap: 2,
             flexWrap: "wrap",
           }}
         >
@@ -331,31 +291,32 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
               <DownloadIcon />
             </IconButton>
           </Tooltip>
+
           <Tooltip title="画像を変更" arrow>
-            <IconButton aria-label="画像を変更" onClick={uploadImage}>
+            <IconButton
+              aria-label="画像を変更"
+              onClick={() => {
+                // if (fileInputRef.current) {
+                //   fileInputRef.current.value = "";
+                //   fileInputRef.current.click();
+                // }
+                uploadImage();
+              }}
+            >
               <UploadFileIcon />
             </IconButton>
           </Tooltip>
         </Box>
-
         <canvas
           ref={canvasRef}
-          onMouseDown={handlePointerDown}
-          onMouseMove={handlePointerMove}
-          onMouseUp={handlePointerUp}
-          onMouseLeave={handlePointerCancel}
-          onTouchStart={handlePointerDown}
-          onTouchMove={handlePointerMove}
-          onTouchEnd={handlePointerUp}
-          onTouchCancel={handlePointerCancel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
           style={{
             display: image ? "block" : "none",
             width: "100%",
             height: "auto",
             cursor: isDrawingLine ? "crosshair" : "pointer",
-            touchAction: "none",
-            WebkitUserSelect: "none",
-            userSelect: "none",
           }}
         />
         {!image && <div>画像を読み込んでいます...</div>}
@@ -366,3 +327,4 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
 
 BlurCanvas.displayName = "BlurCanvas";
 export default BlurCanvas;
+// export type { BlurCanvasRef }; // 型も export
