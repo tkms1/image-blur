@@ -13,11 +13,12 @@ import BlurCanvas, { BlurCanvasRef } from "./BlurCanvas";
 import BlurControls from "./BlurControls";
 import UndoIcon from "@mui/icons-material/Undo";
 import IconButton from "@mui/material/IconButton";
-import Tooltip from "@mui/material/Tooltip"; // 👈 追加
+import Tooltip from "@mui/material/Tooltip";
 import DownloadIcon from "@mui/icons-material/Download";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import AppHeaderClientOnly from "../_components/AppHeaderClientOnly";
 import AppHeaderClientBlur from "../_components/AppHeaderClientBlur";
+
 type BlurRegion = {
   id: string;
   type: "circle" | "line";
@@ -41,7 +42,6 @@ export default function BlurEditorPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [isDraggingOnCanvas, setIsDraggingOnCanvas] = useState(false);
 
-  // ✅ プレビューサークル用 state/ref
   const [previewCircle, setPreviewCircle] = useState<{
     radius: number;
     visible: boolean;
@@ -78,7 +78,6 @@ export default function BlurEditorPage() {
     };
   }, [undoStack]);
 
-  // ✅ プレビュークリーンアップ（アンマウント時）
   useEffect(() => {
     return () => {
       if (previewTimeoutRef.current) {
@@ -88,7 +87,6 @@ export default function BlurEditorPage() {
   }, []);
 
   const loadNewImage = (file: File) => {
-    // タイマークリア（画像変更時はプレビュー不要）
     if (previewTimeoutRef.current) {
       clearTimeout(previewTimeoutRef.current);
       previewTimeoutRef.current = null;
@@ -121,7 +119,7 @@ export default function BlurEditorPage() {
     if (file) loadNewImage(file);
   };
 
-  // --- 初期画面：Drop Zone ---
+  // --- Drop Zone ---
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -152,7 +150,7 @@ export default function BlurEditorPage() {
     }
   };
 
-  // --- 編集画面：Canvas Drop Zone ---
+  // --- Canvas Drop Zone ---
   const handleCanvasDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -262,30 +260,25 @@ export default function BlurEditorPage() {
     document.body.removeChild(link);
   };
 
-  // ✅ ぼかしサイズ変更時のプレビュー表示
   const handleRadiusChange = (value: number) => {
     setBlurRadius(value);
-
-    // 前のタイマーをクリア
     if (previewTimeoutRef.current) {
       clearTimeout(previewTimeoutRef.current);
     }
-
-    // 新たに表示
     setPreviewCircle({ radius: value, visible: true });
-
-    // 3秒後に非表示
     previewTimeoutRef.current = setTimeout(() => {
       setPreviewCircle(null);
       previewTimeoutRef.current = null;
     }, 3000);
   };
+
   const uploadImage = () => {
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
       fileInputRef.current.click();
     }
   };
+
   return (
     <>
       <AppHeaderClientBlur
@@ -322,7 +315,6 @@ export default function BlurEditorPage() {
                 ? "ここにドロップして画像を読み込み 📤"
                 : "画像をドラッグ＆ドロップするか、"}
             </Typography>
-
             <Button
               variant="contained"
               component="label"
@@ -340,7 +332,6 @@ export default function BlurEditorPage() {
                 ref={fileInputRef}
               />
             </Button>
-
             {fileError && <Alert severity="error">{fileError}</Alert>}
           </Box>
         ) : (
@@ -355,52 +346,6 @@ export default function BlurEditorPage() {
               />
             </Box>
 
-            {/* 👇 コントロールバー：BlurCanvas の外（上 or 下） */}
-            {/* <Box
-            sx={{
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 1,
-              mb: 2,
-            }}
-          >
-            <Tooltip title="もとに戻す" arrow>
-              <IconButton
-                aria-label="元に戻す"
-                onClick={undo}
-                disabled={undoStack.length === 0}
-              >
-                <UndoIcon />
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip title="ダウンロード" arrow>
-              <IconButton
-                aria-label="ダウンロード"
-                onClick={handleDownload}
-                disabled={blurRegions.length === 0 || isProcessing}
-              >
-                {isProcessing ? (
-                  <CircularProgress size={24} color="inherit" />
-                ) : (
-                  <DownloadIcon />
-                )}
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip title="画像を変更" arrow>
-              <IconButton
-                aria-label="画像を変更"
-                onClick={() => {
-                  uploadImage();
-                }}
-              >
-                <UploadFileIcon />
-              </IconButton>
-            </Tooltip>
-          </Box> */}
-
-            {/* 隠し input（どこか1か所あればOK） */}
             <input
               type="file"
               hidden
@@ -409,7 +354,6 @@ export default function BlurEditorPage() {
               ref={fileInputRef}
             />
 
-            {/* BlurCanvas */}
             <Box
               ref={canvasDropZoneRef}
               onDragOver={handleCanvasDragOver}
@@ -462,18 +406,17 @@ export default function BlurEditorPage() {
                 undoStack={undoStack}
                 isProcessing={isProcessing}
                 uploadImage={uploadImage}
-                // fileInputRef={fileInputRef}
               />
             </Box>
           </>
         )}
 
-        {/* ✅ ぼかしサイズ変更時のプレビュー円（画面中央に表示） */}
+        {/* プレビューサークル（中央表示） */}
         {previewCircle && (
           <Box
             sx={{
               position: "fixed",
-              top: { xs: "20%", sm: "40%" }, // 画面中央"20%",
+              top: { xs: "20%", sm: "40%" },
               left: { xs: "20%", sm: "20%" },
               transform: `translate(-50%, -50%) scale(${
                 previewCircle.visible ? 1 : 0.9
@@ -484,7 +427,7 @@ export default function BlurEditorPage() {
               border: "2px dashed #1976d2",
               backgroundColor: "rgba(25, 118, 210, 0.08)",
               pointerEvents: "none",
-              zIndex: 1300, // Modal/Drawerより上
+              zIndex: 1300,
               opacity: previewCircle.visible ? 1 : 0,
               transition: "opacity 0.3s ease, transform 0.3s ease",
             }}
