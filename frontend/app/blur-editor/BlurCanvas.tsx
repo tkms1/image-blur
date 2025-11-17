@@ -104,22 +104,55 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
 
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
 
-      canvas.width = image.width;
-      canvas.height = image.height;
+      // ===== 1. 表示領域の計算（親要素 or viewport 制限） =====
+      const maxWidth = Math.min(image.width, window.innerWidth * 0.9); // 画面の90%を上限
+      const maxHeight = Math.min(image.height, window.innerHeight * 0.7); // 高さは70%
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(image, 0, 0);
+      // アスペクト比を保って縮小
+      const aspectRatio = image.width / image.height;
+      let displayWidth = image.width;
+      let displayHeight = image.height;
+
+      if (displayWidth > maxWidth) {
+        displayWidth = maxWidth;
+        displayHeight = displayWidth / aspectRatio;
+      }
+      if (displayHeight > maxHeight) {
+        displayHeight = maxHeight;
+        displayWidth = displayHeight * aspectRatio;
+      }
+
+      // ===== 2. キャンバス設定 =====
+      // 物理キャンバスサイズ（高解像度対応）
+      canvas.width = displayWidth * dpr;
+      canvas.height = displayHeight * dpr;
+
+      // CSS 表示サイズ（論理サイズ）
+      canvas.style.width = `${displayWidth}px`;
+      canvas.style.height = `${displayHeight}px`;
+
+      // スケール適用
+      ctx.scale(dpr, dpr);
+
+      // ===== 3. 描画（スケール後の論理座標で） =====
+      ctx.clearRect(0, 0, displayWidth, displayHeight);
+      ctx.drawImage(image, 0, 0, displayWidth, displayHeight);
+      // canvas.width = image.width;
+      // canvas.height = image.height;
+
+      // ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // ctx.drawImage(image, 0, 0);
 
       blurRegions.forEach((region) => {
         if (region.type === "circle") {
           const { x, y, radius, strength } = region;
-
+          // 一時キャンバス（高解像度対応）
           const tempCanvas = document.createElement("canvas");
           const tempCtx = tempCanvas.getContext("2d")!;
-          tempCanvas.width = radius * 2;
-          tempCanvas.height = radius * 2;
-
+          tempCanvas.width = radius * 2 * dpr;
+          tempCanvas.height = radius * 2 * dpr;
           tempCtx.drawImage(
             canvas,
             x - radius,
@@ -139,7 +172,11 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
             tempCtx.drawImage(tempCanvas, 0, 0);
             tempCtx.filter = "none";
           }
-
+          // ぼかし適用（CSS blur は物理ピクセル単位で解釈されるため、dpr で割る必要あり）
+          const blurPx = strength / dpr; // 👈 重要：CSS blur は物理ピクセル単位
+          tempCtx.filter = `blur(${blurPx}px)`;
+          tempCtx.drawImage(tempCanvas, 0, 0);
+          tempCtx.filter = "none";
           ctx.save();
           ctx.beginPath();
           ctx.arc(x, y, radius, 0, Math.PI * 2);
@@ -315,7 +352,7 @@ const BlurCanvas = forwardRef<BlurCanvasRef, Props>(
           style={{
             display: image ? "block" : "none",
             width: "100%",
-            height: "auto",
+            height: "100%",
             cursor: isDrawingLine ? "crosshair" : "pointer",
           }}
         />

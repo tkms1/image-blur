@@ -52,7 +52,22 @@ export default function BlurEditorPage() {
   const canvasRef = useRef<BlurCanvasRef>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const canvasDropZoneRef = useRef<HTMLDivElement>(null);
-
+  // ✅ dpr を考慮した座標取得関数
+  const getCanvasCoordinates = (
+    clientX: number,
+    clientY: number,
+    canvas: HTMLCanvasElement
+  ) => {
+    const rect = canvas.getBoundingClientRect();
+    // キャンバスのCSSサイズ（論理サイズ）は画像のwidth/heightに設定されている前提
+    const scaleX = canvas.width / (rect.width * (window.devicePixelRatio || 1));
+    const scaleY =
+      canvas.height / (rect.height * (window.devicePixelRatio || 1));
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  };
   const pushToUndoStack = () => {
     setUndoStack((prev) => [...prev, blurRegions]);
   };
@@ -261,7 +276,19 @@ export default function BlurEditorPage() {
     link.click();
     document.body.removeChild(link);
   };
+  // 他の useState の近くに追加
+  const [dpr, setDpr] = useState(1);
 
+  useEffect(() => {
+    const handleResize = () => {
+      setDpr(window.devicePixelRatio || 1);
+    };
+    window.addEventListener("resize", handleResize);
+    handleResize(); // 初期値設定
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
   // ✅ ぼかしサイズ変更時のプレビュー表示
   const handleRadiusChange = (value: number) => {
     setBlurRadius(value);
@@ -271,8 +298,11 @@ export default function BlurEditorPage() {
       clearTimeout(previewTimeoutRef.current);
     }
 
+    // 👇 CSS ピクセル単位に変換（実際の描画サイズと一致させるため）
+    const cssRadius = value / dpr;
+
     // 新たに表示
-    setPreviewCircle({ radius: value, visible: true });
+    setPreviewCircle({ radius: cssRadius, visible: true });
 
     // 3秒後に非表示
     previewTimeoutRef.current = setTimeout(() => {
