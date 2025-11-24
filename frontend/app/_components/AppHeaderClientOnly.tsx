@@ -64,11 +64,11 @@ const AppHeaderClientOnly = () => {
       ? "/signup"
       : `/signup?redirect_to=${encodeURIComponent(targetUrl)}`;
 
-  const navItems = [{ name: "ホーム", link: "/blur-editor" }];
+  const navItems = [{ name: "ホーム", link: "/blur" }];
   // console.log("pathname:", pathname);
   return (
     <>
-      {pathname !== "/blur-editor" && (
+      {pathname !== "/blur" && (
         <Box
           component="header"
           sx={{
