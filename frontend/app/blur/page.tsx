@@ -36,7 +36,10 @@ import {
   Undo as UndoIcon,
   Redo as RedoIcon,
 } from "@mui/icons-material";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
 
+import NextImage from "next/image";
+import Link from "next/link";
 const BlurTool = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
@@ -50,9 +53,14 @@ const BlurTool = () => {
   const originalImageRef = useRef<HTMLImageElement | null>(null);
   const workingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [blurRadius, setBlurRadius] = useState(20);
-  const [blurSize, setBlurSize] = useState(100);
+  const [blurSize, setBlurSize] = useState(50);
   const [lastDrawTime, setLastDrawTime] = useState(0);
-
+  const [previewCircle, setPreviewCircle] = useState<{
+    radius: number;
+    visible: boolean;
+  } | null>(null);
+  const previewTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [dpr, setDpr] = useState(1);
   // Optimized undo/redo system
   const [canvasHistory, setCanvasHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -493,7 +501,51 @@ const BlurTool = () => {
   const handleBlurSizeChange = (_: Event, newValue: number | number[]) => {
     setBlurSize(newValue as number);
   };
+  // ✅ dpr 監視（プレビューの物理サイズ→CSSサイズ変換用）
+  useEffect(() => {
+    const handleResize = () => {
+      setDpr(window.devicePixelRatio || 1);
+    };
+    window.addEventListener("resize", handleResize);
+    handleResize();
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
 
+  // ✅ プレビュークリーンアップ
+  useEffect(() => {
+    return () => {
+      if (previewTimeoutRef.current) {
+        clearTimeout(previewTimeoutRef.current);
+      }
+    };
+  }, []);
+  // ===== スライダー（サイズ）変更 → プレビュー付き =====
+  const handleBlurSizeChangeWithPreview = (
+    _: Event,
+    newValue: number | number[]
+  ) => {
+    const value = newValue as number;
+    setBlurSize(value);
+
+    // 前のタイマーをクリア
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current);
+    }
+
+    // CSS ピクセル単位に変換（dpr 補正）
+    const cssRadius = value / dpr / 2; // blurSize は直径なので半径として /2
+
+    // プレビュー表示
+    setPreviewCircle({ radius: cssRadius, visible: true });
+
+    // 3秒後に非表示
+    previewTimeoutRef.current = setTimeout(() => {
+      setPreviewCircle(null);
+      previewTimeoutRef.current = null;
+    }, 3000);
+  };
   return (
     <Box
       sx={{
@@ -512,71 +564,157 @@ const BlurTool = () => {
           borderColor: "divider",
         }}
       >
-        <Toolbar>
-          <Typography
-            variant="h6"
-            component="div"
-            sx={{
-              fontWeight: 700,
-              flexGrow: 1,
-              color: "primary.main",
-            }}
-          >
-            画像ぼかしツール
-          </Typography>
-          <Button
-            startIcon={<UndoIcon />}
-            onClick={undoLastAction}
-            disabled={historyIndex <= 0}
-            variant="outlined"
-            color="primary"
-            sx={{
-              borderRadius: 2,
-              textTransform: "none",
-              mr: 1,
-            }}
-          >
-            {isMobile ? "戻す" : "戻す (Ctrl+Z)"}
-          </Button>
-          <Button
-            startIcon={<RedoIcon />}
-            onClick={redoLastAction}
-            disabled={historyIndex >= canvasHistory.length - 1}
-            variant="outlined"
-            color="primary"
-            sx={{
-              borderRadius: 2,
-              textTransform: "none",
-              mr: 1,
-            }}
-          >
-            {isMobile ? "やり直す" : "やり直す (Ctrl+Y)"}
-          </Button>
-          <Button
-            startIcon={<UploadIcon />}
-            onClick={() => fileInputRef.current?.click()}
-            variant="contained"
-            color="primary"
-            sx={{
-              borderRadius: 2,
-              textTransform: "none",
-              fontWeight: 600,
-            }}
-          >
-            {isMobile ? "アップロード" : "画像をアップロード"}
-          </Button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleImageUpload}
-            accept="image/*"
-            style={{ display: "none" }}
-          />
+        <Toolbar
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Link
+              href="/"
+              className="no-underline text-white flex items-center gap-2"
+            >
+              <NextImage
+                src="/top-image.png"
+                width={50}
+                height={40}
+                alt="logo"
+                priority
+              />
+              {/* テキスト：PCのみ表示 */}
+              <Typography
+                variant="body1"
+                sx={{
+                  color: "text.primary",
+                  display: { xs: "none", sm: "block" },
+                }}
+              >
+                画像ぼかし
+              </Typography>
+            </Link>
+            {/* <Button
+              startIcon={<UndoIcon />}
+              onClick={undoLastAction}
+              disabled={historyIndex <= 0}
+              variant="outlined"
+              color="primary"
+              sx={{
+                borderRadius: 2,
+                textTransform: "none",
+                // mr: { sm: 1 },
+              }}
+            >
+              {isMobile ? "" : "戻す (Ctrl+Z)"}
+            </Button>
+            <Button
+              startIcon={<RedoIcon />}
+              onClick={redoLastAction}
+              disabled={historyIndex >= canvasHistory.length - 1}
+              variant="outlined"
+              color="primary"
+              sx={{
+                borderRadius: 2,
+                textTransform: "none",
+              }}
+            >
+              {isMobile ? "" : "やり直す (Ctrl+Y)"}
+            </Button>
+            <Button
+              startIcon={<UploadIcon />}
+              onClick={() => fileInputRef.current?.click()}
+              variant="contained"
+              color="primary"
+              sx={{
+                borderRadius: 2,
+                textTransform: "none",
+                fontWeight: 600,
+              }}
+            >
+              {isMobile ? "" : "画像をアップロード"}
+            </Button> */}
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              {/* <Button
+                startIcon={<UndoIcon />}
+                onClick={undoLastAction}
+                disabled={historyIndex <= 0}
+                variant="outlined"
+                color="primary"
+                sx={{
+                  borderRadius: 2,
+                  textTransform: "none",
+                  // mr: { sm: 1 },
+                }}
+              >
+                {isMobile ? "" : "戻す (Ctrl+Z)"}
+              </Button> */}
+              <Tooltip title="もとに戻す" arrow>
+                <IconButton
+                  aria-label="元に戻す"
+                  onClick={undoLastAction}
+                  disabled={historyIndex <= 0}
+                >
+                  <UndoIcon />
+                </IconButton>
+              </Tooltip>
+              {/* <Button
+                startIcon={<RedoIcon />}
+                onClick={redoLastAction}
+                disabled={historyIndex >= canvasHistory.length - 1}
+                variant="outlined"
+                color="primary"
+                sx={{
+                  borderRadius: 2,
+                  textTransform: "none",
+                }}
+              >
+                {isMobile ? "" : "やり直す (Ctrl+Y)"}
+              </Button> */}
+              <Tooltip title="もとに戻す" arrow>
+                <IconButton
+                  aria-label="やり直す"
+                  onClick={redoLastAction}
+                  disabled={historyIndex >= canvasHistory.length - 1}
+                >
+                  <RedoIcon />
+                </IconButton>
+              </Tooltip>
+              {/* <Button
+                startIcon={<UploadIcon />}
+                onClick={() => fileInputRef.current?.click()}
+                variant="contained"
+                color="primary"
+                sx={{
+                  borderRadius: 2,
+                  textTransform: "none",
+                  fontWeight: 600,
+                }}
+              >
+                {isMobile ? "" : "画像をアップロード"}
+              </Button> */}
+              <Tooltip title="画像を変更" arrow>
+                <IconButton
+                  aria-label="画像を変更"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <UploadFileIcon />
+                </IconButton>
+              </Tooltip>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleImageUpload}
+                accept="image/*"
+                style={{ display: "none" }}
+              />
+            </Box>
+          </Box>
         </Toolbar>
       </AppBar>
 
       <Container maxWidth="lg" sx={{ mt: 4 }}>
-        <Typography
+        {/* <Typography
           variant="h4"
           component="h1"
           align="center"
@@ -587,39 +725,38 @@ const BlurTool = () => {
           }}
         >
           個人情報を簡単に保護
-        </Typography>
-
+        </Typography> */}
+        {/* 
         <Typography
           variant="subtitle1"
           align="center"
           color="text.secondary"
-          // paragraph
           sx={{ maxWidth: 700, mx: "auto" }}
         >
           画像をアップロードして、クリックまたはドラッグでぼかしをかけられます。
           📤 画像をこのエリアにドラッグ＆ドロップでもアップロードできます。
-        </Typography>
+        </Typography> */}
 
-        <Grid container spacing={3} sx={{ mt: 2 }}>
-          <Grid size={{ xs: 12, md: 8 }}>
+        <Grid container spacing={3}>
+          <Grid size={{ xs: 12, md: 12 }}>
             <Card
               elevation={3}
               sx={{
                 borderRadius: 3,
                 overflow: "hidden",
-                height: "100%",
+                // height: "100%",
               }}
             >
               <CardContent sx={{ p: 0 }}>
                 <Box
                   sx={{
-                    p: 2,
+                    // p: 2,
                     bgcolor: "background.default",
                     borderBottom: 1,
                     borderColor: "divider",
                   }}
                 >
-                  <Grid container spacing={2} alignItems="center">
+                  {/* <Grid container spacing={2} alignItems="center">
                     <Grid size={{ xs: 12, sm: "auto" }}>
                       <Button
                         fullWidth
@@ -650,7 +787,7 @@ const BlurTool = () => {
                         ダウンロード
                       </Button>
                     </Grid>
-                  </Grid>
+                  </Grid> */}
                 </Box>
 
                 <Box
@@ -662,7 +799,7 @@ const BlurTool = () => {
                   }}
                 >
                   <Grid container spacing={2}>
-                    <Grid size={{ xs: 12, sm: 6 }}>
+                    <Grid size={{ xs: 12, sm: 12 }}>
                       <Typography variant="subtitle2" gutterBottom>
                         ぼかし強度: {blurRadius}px
                       </Typography>
@@ -682,16 +819,17 @@ const BlurTool = () => {
                         }}
                       />
                     </Grid>
-                    <Grid size={{ xs: 12, sm: 6 }}>
+                    <Grid size={{ xs: 12, sm: 12 }}>
                       <Typography variant="subtitle2" gutterBottom>
                         サイズ: {blurSize}px
                       </Typography>
                       <Slider
                         value={blurSize}
-                        onChange={handleBlurSizeChange}
-                        min={50}
+                        onChange={handleBlurSizeChangeWithPreview} // ← 差し替え
+                        // onChange={handleBlurSizeChange}
+                        min={5}
                         max={300}
-                        step={10}
+                        step={5}
                         color="secondary"
                         sx={{
                           color: theme.palette.secondary.main,
@@ -701,6 +839,28 @@ const BlurTool = () => {
                           },
                         }}
                       />
+                      {previewCircle && (
+                        <Box
+                          sx={{
+                            position: "fixed",
+                            top: { xs: "30%", sm: "40%" },
+                            left: "50%",
+                            transform: `translate(-50%, -50%) scale(${
+                              previewCircle.visible ? 1 : 0.9
+                            })`,
+                            width: previewCircle.radius * 2,
+                            height: previewCircle.radius * 2,
+                            borderRadius: "50%",
+                            border: "2px dashed #1976d2",
+                            backgroundColor: "rgba(25, 118, 210, 0.08)",
+                            pointerEvents: "none",
+                            zIndex: 1300,
+                            opacity: previewCircle.visible ? 1 : 0,
+                            transition:
+                              "opacity 0.3s ease, transform 0.3s ease",
+                          }}
+                        />
+                      )}
                     </Grid>
                   </Grid>
                 </Box>
@@ -711,27 +871,82 @@ const BlurTool = () => {
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
-                  sx={{
-                    p: 1,
-                    position: "relative",
-                    minHeight: { xs: 300, sm: 400, md: 500 },
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    overflow: "hidden",
-                    // ✅ 正しく1回だけ bgcolor を定義
-                    bgcolor: isDragOver
-                      ? alpha(theme.palette.primary.main, 0.05)
-                      : "grey.100",
-                    border: isDragOver
-                      ? `3px dashed ${theme.palette.primary.main}`
-                      : "none",
-                    borderRadius: 2,
-                    transition: "border 0.2s ease",
-                  }}
+                  // sx={{
+                  //   p: 1,
+                  //   position: "relative",
+                  //   minHeight: { xs: 300, sm: 400, md: 500 },
+                  //   display: { xs: "none", sm: "flex" },
+                  //   justifyContent: "flex-end",
+                  //   alignItems: "center",
+                  //   flexWrap: "wrap",
+                  //   overflow: "hidden",
+                  //   // ✅ 正しく1回だけ bgcolor を定義
+                  //   bgcolor: isDragOver
+                  //     ? alpha(theme.palette.primary.main, 0.05)
+                  //     : "grey.100",
+                  //   border: isDragOver
+                  //     ? `3px dashed ${theme.palette.primary.main}`
+                  //     : "none",
+                  //   borderRadius: 2,
+                  //   transition: "border 0.2s ease",
+                  // }}
                 >
                   {imageSrc ? (
-                    <>
+                    <Box
+                      sx={{
+                        p: 1,
+                        // position: "relative", // 不要な場合が多いので削除
+                        // minHeight: { xs: 300, sm: 400, md: 500 }, // 高さを固定するとスマホで不自然になるので削除
+                        display: { xs: "flex", sm: "flex" }, // ← xs でも flex に変更！
+                        justifyContent: "center", // 中央揃えに変更（スマホ向け）
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        overflow: "hidden",
+                        bgcolor: isDragOver
+                          ? alpha(theme.palette.primary.main, 0.05)
+                          : "grey.100",
+                        border: isDragOver
+                          ? `3px dashed ${theme.palette.primary.main}`
+                          : "none",
+                        borderRadius: 2,
+                        transition: "border 0.2s ease",
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          display: "flex",
+                          justifyContent: "flex-end", // → ここがポイント
+                          width: "100%",
+                          mb: 1,
+                        }}
+                      >
+                        <Tooltip title="もとに戻す" arrow>
+                          <IconButton
+                            aria-label="元に戻す"
+                            onClick={undoLastAction}
+                            disabled={historyIndex <= 0}
+                          >
+                            <UndoIcon />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="ダウンロード" arrow>
+                          <IconButton
+                            aria-label="ダウンロード"
+                            onClick={downloadImage}
+                            disabled={historyIndex <= 0}
+                          >
+                            <DownloadIcon />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="画像を変更" arrow>
+                          <IconButton
+                            aria-label="画像を変更"
+                            onClick={() => fileInputRef.current?.click()}
+                          >
+                            <UploadFileIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
                       <canvas
                         ref={canvasRef}
                         onMouseDown={handleCanvasMouseDown}
@@ -746,74 +961,129 @@ const BlurTool = () => {
                         onTouchEnd={handleCanvasMouseUp}
                         style={{
                           maxWidth: "100%",
-                          // maxHeight: "70vh",
+                          maxHeight: "70vh", // スマホで高すぎないように制限
                           cursor: isMouseDown ? "crosshair" : "crosshair",
                           display: "block",
                         }}
                       />
-                    </>
+                      {/* </Box> */}
+                    </Box>
                   ) : (
-                    // ✅ ドラッグ案内を強化
+                    // ドラッグ＆ドロップ案内
                     <Box
                       sx={{
-                        textAlign: "center",
-                        p: 3,
-                        maxWidth: "80%",
+                        p: 1,
+                        position: "relative",
+                        minHeight: { xs: 200, sm: 300, md: 400 }, // 高さを少し下げてスマホ対応
+                        display: { xs: "flex", sm: "flex" }, // ← xs でも flex に変更！
+                        justifyContent: "center", // 中央揃え
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        overflow: "hidden",
+                        bgcolor: isDragOver
+                          ? alpha(theme.palette.primary.main, 0.05)
+                          : "grey.100",
+                        border: isDragOver
+                          ? `3px dashed ${theme.palette.primary.main}`
+                          : "none",
+                        borderRadius: 2,
+                        transition: "border 0.2s ease",
                       }}
                     >
                       <Zoom in={!isDragOver} timeout={300}>
-                        <Box>
-                          <Box
-                            sx={{
-                              width: 64,
-                              height: 64,
-                              borderRadius: "50%",
-                              bgcolor: alpha(theme.palette.primary.main, 0.1),
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              mx: "auto",
-                              mb: 2,
-                            }}
-                          >
-                            <UploadIcon
-                              sx={{
-                                fontSize: 32,
-                                color: theme.palette.primary.main,
-                              }}
-                            />
-                          </Box>
-                          <Typography
-                            variant="h6"
-                            color="text.secondary"
-                            gutterBottom
-                          >
-                            画像をアップロード
-                          </Typography>
-                          <Typography
-                            variant="body2"
-                            color="text.secondary"
-                            sx={{ mb: 1 }}
-                          >
-                            ボタンをクリック、または画像をドラッグ＆ドロップ
-                          </Typography>
-                          <Box
-                            component="span"
-                            sx={{
-                              bgcolor: alpha(theme.palette.primary.main, 0.1),
-                              color: "primary.main",
-                              px: 1.5,
-                              py: 0.5,
-                              borderRadius: 1,
-                              fontSize: "0.85rem",
-                              fontWeight: 600,
-                            }}
-                          >
-                            対応フォーマット: JPG, PNG, WEBP
-                          </Box>
+                        <Box
+                          sx={{
+                            textAlign: "center",
+                            p: 2,
+                            width: "100%",
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            flexDirection: "column",
+                            minHeight: { xs: 200, sm: 300, md: 400 },
+                          }}
+                        >
+                          <Zoom in={!isDragOver} timeout={300}>
+                            <Box>
+                              <Box
+                                sx={{
+                                  width: 64,
+                                  height: 64,
+                                  borderRadius: "50%",
+                                  bgcolor: alpha(
+                                    theme.palette.primary.main,
+                                    0.1
+                                  ),
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  mx: "auto",
+                                  mb: 2,
+                                }}
+                              >
+                                <UploadIcon
+                                  sx={{
+                                    fontSize: 32,
+                                    color: theme.palette.primary.main,
+                                  }}
+                                  className="cursor-pointer"
+                                  onClick={() => fileInputRef.current?.click()}
+                                />
+                              </Box>
+                              <Typography
+                                variant="h6"
+                                color="text.secondary"
+                                gutterBottom
+                              >
+                                画像をアップロード
+                              </Typography>
+                              <Typography
+                                variant="body2"
+                                color="text.secondary"
+                                sx={{ mb: 1 }}
+                              >
+                                ボタンをクリック、または画像をドラッグ＆ドロップ
+                              </Typography>
+                              <Box
+                                component="span"
+                                sx={{
+                                  bgcolor: alpha(
+                                    theme.palette.primary.main,
+                                    0.1
+                                  ),
+                                  color: "primary.main",
+                                  px: 1.5,
+                                  py: 0.5,
+                                  borderRadius: 1,
+                                  fontSize: "0.85rem",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                対応フォーマット: JPG, PNG, WEBP
+                              </Box>
+                            </Box>
+                          </Zoom>
+                          {isDragOver && (
+                            <Zoom in timeout={200}>
+                              <Box>
+                                <Typography
+                                  variant="h5"
+                                  color="primary"
+                                  sx={{ fontWeight: 700, mb: 1 }}
+                                >
+                                  ここで放してください
+                                </Typography>
+                                <Typography
+                                  variant="body2"
+                                  color="text.secondary"
+                                >
+                                  画像をアップロードします
+                                </Typography>
+                              </Box>
+                            </Zoom>
+                          )}
                         </Box>
                       </Zoom>
-
                       {/* ドラッグ中は簡潔なメッセージ */}
                       {isDragOver && (
                         <Zoom in timeout={200}>
@@ -837,7 +1107,7 @@ const BlurTool = () => {
               </CardContent>
             </Card>
 
-            <Paper
+            {/* <Paper
               elevation={0}
               sx={{
                 mt: 2,
@@ -901,7 +1171,6 @@ const BlurTool = () => {
                     </Typography>
                   </Box>
                 </Grid>
-                {/* ✅ 新規：ドラッグ＆ドロップ案内 */}
                 <Grid size={{ xs: 12, sm: 6 }}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     <Box
@@ -917,7 +1186,6 @@ const BlurTool = () => {
                     </Typography>
                   </Box>
                 </Grid>
-                {/* 新規：Undoショートカット案内 */}
                 <Grid size={{ xs: 12, sm: 6 }}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     <Box
@@ -949,11 +1217,10 @@ const BlurTool = () => {
                   </Box>
                 </Grid>
               </Grid>
-            </Paper>
+            </Paper> */}
           </Grid>
 
-          <Grid size={{ xs: 12, md: 4 }}>
-            {/* 右側のガイドは変更なし */}
+          {/* <Grid size={{ xs: 12, md: 4 }}>
             <Card
               elevation={3}
               sx={{
@@ -1071,7 +1338,7 @@ const BlurTool = () => {
                 </CardContent>
               </Box>
             </Card>
-          </Grid>
+          </Grid> */}
         </Grid>
 
         <Box sx={{ mt: 4, textAlign: "center" }}>
