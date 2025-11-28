@@ -737,7 +737,7 @@ const BlurTool = () => {
           📤 画像をこのエリアにドラッグ＆ドロップでもアップロードできます。
         </Typography> */}
 
-        <Grid container spacing={3} >
+        <Grid container spacing={3}>
           <Grid size={{ xs: 12, md: 12 }}>
             <Card
               elevation={3}
@@ -1026,6 +1026,7 @@ const BlurTool = () => {
                                     fontSize: 32,
                                     color: theme.palette.primary.main,
                                   }}
+                                  className="cursor-pointer"
                                   onClick={() => fileInputRef.current?.click()}
                                 />
                               </Box>
