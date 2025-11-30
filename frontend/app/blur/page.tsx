@@ -40,6 +40,7 @@ import UploadFileIcon from "@mui/icons-material/UploadFile";
 
 import NextImage from "next/image";
 import Link from "next/link";
+
 const BlurTool = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
@@ -52,6 +53,12 @@ const BlurTool = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const originalImageRef = useRef<HTMLImageElement | null>(null);
   const workingCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // ▼▼▼ ズーム機能用のStateとRefを追加 ▼▼▼
+  const [zoom, setZoom] = useState(1);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // ▲▲▲ 追加終わり ▲▲▲
+
   const [blurRadius, setBlurRadius] = useState(20);
   const [blurSize, setBlurSize] = useState(50);
   const [lastDrawTime, setLastDrawTime] = useState(0);
@@ -66,10 +73,6 @@ const BlurTool = () => {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const maxHistorySteps = 50;
 
-  // デフォルト画像
-  // useEffect(() => {
-  //   setImageSrc("https://picsum.photos/id/237/800/600");
-  // }, []);
   // ===== キャンバス状態を保存 =====
   const saveCanvasState = useCallback(() => {
     if (!workingCanvasRef.current) return;
@@ -123,11 +126,10 @@ const BlurTool = () => {
       };
       img.src = previousState;
 
-      return prevHistory; // setState 関数内で副作用を起こさないため
+      return prevHistory;
     });
-  }, [historyIndex]); // ← historyIndex のみで OK（canvasHistory は setState updater で取得）
+  }, [historyIndex]);
 
-  // ===== やり直し =====
   // ===== やり直し =====
   const redoLastAction = useCallback(() => {
     setCanvasHistory((prevHistory) => {
@@ -164,6 +166,9 @@ const BlurTool = () => {
   // キャンバス初期化と描画
   useEffect(() => {
     if (!imageSrc || !canvasRef.current) return;
+
+    // 画像が変更されたらズームをリセット
+    // setZoom(1);
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
@@ -202,7 +207,7 @@ const BlurTool = () => {
     };
 
     img.src = imageSrc;
-  }, [imageSrc]);
+  }, [imageSrc]); // saveCanvasStateは依存配列から除外（ループ防止のため）
 
   // ===== キーボードショートカット =====
   useEffect(() => {
@@ -226,8 +231,41 @@ const BlurTool = () => {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [undoLastAction, redoLastAction]); // ← ✅ 依存配列に追加！
+  }, [undoLastAction, redoLastAction]);
 
+  // ▼▼▼ ズーム操作 (Ctrl + Wheel) のイベントリスナーを追加 ▼▼▼
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // Ctrlキー (またはMetaキー) が押されている場合のみズーム
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault(); // ブラウザ標準のズームを無効化
+
+        // ホイールの回転量に応じてズーム倍率を計算
+        // deltaYが負=奥へ回転(拡大)、正=手前へ回転(縮小)
+        const zoomSensitivity = 0.001;
+        const delta = -e.deltaY * zoomSensitivity;
+
+        setZoom((prevZoom) => {
+          const newZoom = prevZoom + delta;
+          // 最小0.1倍、最大5倍に制限
+          return Math.min(Math.max(newZoom, 0.1), 5);
+        });
+      }
+    };
+
+    // passive: false にしないと e.preventDefault() が効かない場合があるため指定
+    container.addEventListener("wheel", handleWheel, { passive: false });
+
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+    };
+  }, [imageSrc]); // 画像がある時のみ機能するように
+  // ▲▲▲ 追加終わり ▲▲▲
+
+  // ===== ファイルアップロード（共通処理）=====
   // ===== ファイルアップロード（共通処理）=====
   const processFile = (file: File) => {
     if (!file.type.match("image.*")) {
@@ -239,6 +277,11 @@ const BlurTool = () => {
     reader.onload = (event) => {
       if (event.target?.result && typeof event.target.result === "string") {
         setImageSrc(event.target.result);
+
+        // ▼▼▼ ここに追加: 画像が新しくなったらズームをリセット ▼▼▼
+        setZoom(1);
+        // ▲▲▲ 追加終わり ▲▲▲
+
         // ブラシ状態をリセット
         if (workingCanvasRef.current) {
           const workingCanvas = workingCanvasRef.current;
@@ -250,12 +293,16 @@ const BlurTool = () => {
               workingCanvas.width,
               workingCanvas.height
             );
-            workingCtx.drawImage(originalImageRef.current, 0, 0);
+            // ※注意: ここで originalImageRef.current を使っていますが、
+            // 非同期読み込みのタイミングによっては古い画像の可能性があります。
+            // 本来は useEffect 側で初期描画を行っているので、ここの描画処理はなくても
+            // 次のレンダリングサイクルで useEffect が走って描画されます。
+            // ただ、履歴のリセット等はここで行うのが正しいです。
 
             // 新しい画像の場合は操作履歴をリセット
             setCanvasHistory([]);
             setHistoryIndex(-1);
-            saveCanvasState();
+            // saveCanvasState(); // ← useEffect側で描画後に保存されるため、ここでは不要かもしれません
           }
         }
       }
@@ -269,7 +316,7 @@ const BlurTool = () => {
     if (file) processFile(file);
   };
 
-  // ✅ ===== ドラッグ＆ドロップ処理 =====
+  // ===== ドラッグ＆ドロップ処理 =====
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -299,12 +346,14 @@ const BlurTool = () => {
     if (!canvasRef.current || !imageSrc) return 1;
 
     const canvas = canvasRef.current;
+    // getBoundingClientRect は CSS transform: scale() 適用後のサイズを返すため、
+    // 自動的にズームに対応した計算になります。
     const rect = canvas.getBoundingClientRect();
 
     const actualWidth = canvas.width; // 画像の物理幅
     const displayWidth = rect.width; // 表示上の幅
 
-    return displayWidth / actualWidth; // 表示スケール（例: 画像が 800px、表示が 400px → 0.5）
+    return displayWidth / actualWidth;
   };
 
   const getCanvasCoords = (clientX: number, clientY: number) => {
@@ -326,6 +375,7 @@ const BlurTool = () => {
 
     return { x, y };
   };
+
   // ===== ブラシぼかし追加 =====
   const applyBlurAt = (x: number, y: number) => {
     if (
@@ -366,7 +416,7 @@ const BlurTool = () => {
       physicalBlurSize
     );
 
-    // 2. 円形クリッピング用のパスを設定（中心から半径 = physicalBlurSize/2 の円）
+    // 2. 円形クリッピング用のパスを設定
     const centerX = physicalBlurSize / 2;
     const centerY = physicalBlurSize / 2;
     const radius = physicalBlurSize / 2;
@@ -374,19 +424,19 @@ const BlurTool = () => {
     blurCtx.beginPath();
     blurCtx.arc(centerX, centerY, radius, 0, Math.PI * 2);
     blurCtx.closePath();
-    blurCtx.save(); // 状態を保存（clip 後に元に戻すため）
-    blurCtx.clip(); // これ以降の描画は円内のみ
+    blurCtx.save();
+    blurCtx.clip();
 
-    // 3. ガウシアンぼかしを適用（clip された円領域に適用される）
+    // 3. ガウシアンぼかしを適用
     blurCtx.filter = `blur(${blurRadius}px)`;
     blurCtx.drawImage(blurCanvas, 0, 0);
 
     // 4. clip 解除
     blurCtx.restore();
 
-    // 5. 円形ぼかし結果を、**透明背景のまま**作業キャンバスに描画（合成モード指定）
+    // 5. 円形ぼかし結果を、**透明背景のまま**作業キャンバスに描画
     workingCtx.save();
-    workingCtx.globalCompositeOperation = "source-over"; // デフォルト（アルファ合成）
+    workingCtx.globalCompositeOperation = "source-over";
     workingCtx.drawImage(
       blurCanvas,
       0,
@@ -441,7 +491,6 @@ const BlurTool = () => {
     setMousePos(coords);
 
     if (isMouseDown) {
-      // 一定間隔で描画（パフォーマンス向上）
       const now = Date.now();
       if (now - lastDrawTime > 50) {
         applyBlurAt(coords.x, coords.y);
@@ -452,7 +501,6 @@ const BlurTool = () => {
 
   const handleCanvasMouseUp = () => {
     setIsMouseDown(false);
-    // マウスアップ時に最後の状態を確実に保存
     saveCanvasState();
   };
 
@@ -466,42 +514,12 @@ const BlurTool = () => {
     link.click();
   };
 
-  const clearAll = () => {
-    if (
-      !originalImageRef.current ||
-      !workingCanvasRef.current ||
-      !canvasRef.current
-    )
-      return;
-
-    const workingCanvas = workingCanvasRef.current;
-    const workingCtx = workingCanvas.getContext("2d");
-    if (workingCtx) {
-      workingCtx.clearRect(0, 0, workingCanvas.width, workingCanvas.height);
-      workingCtx.drawImage(originalImageRef.current, 0, 0);
-
-      // 表示用キャンバスにも反映
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas?.height);
-        ctx.drawImage(workingCanvas, 0, 0);
-      }
-
-      // 初期状態として保存
-      saveCanvasState();
-    }
-  };
-
   // ===== スライダー =====
   const handleBlurRadiusChange = (_: Event, newValue: number | number[]) => {
     setBlurRadius(newValue as number);
   };
 
-  const handleBlurSizeChange = (_: Event, newValue: number | number[]) => {
-    setBlurSize(newValue as number);
-  };
-  // ✅ dpr 監視（プレビューの物理サイズ→CSSサイズ変換用）
+  // dpr 監視
   useEffect(() => {
     const handleResize = () => {
       setDpr(window.devicePixelRatio || 1);
@@ -513,7 +531,7 @@ const BlurTool = () => {
     };
   }, []);
 
-  // ✅ プレビュークリーンアップ
+  // プレビュークリーンアップ
   useEffect(() => {
     return () => {
       if (previewTimeoutRef.current) {
@@ -521,6 +539,8 @@ const BlurTool = () => {
       }
     };
   }, []);
+
+  // ===== スライダー（サイズ）変更 → プレビュー付き =====
   // ===== スライダー（サイズ）変更 → プレビュー付き =====
   const handleBlurSizeChangeWithPreview = (
     _: Event,
@@ -529,23 +549,24 @@ const BlurTool = () => {
     const value = newValue as number;
     setBlurSize(value);
 
-    // 前のタイマーをクリア
     if (previewTimeoutRef.current) {
       clearTimeout(previewTimeoutRef.current);
     }
 
-    // CSS ピクセル単位に変換（dpr 補正）
-    const cssRadius = value / dpr / 2; // blurSize は直径なので半径として /2
+    // ▼▼▼ 修正箇所 ▼▼▼
+    // dpr で割る必要はありません。スライダーの値(value)はそのままCSSピクセルとして扱います。
+    const cssRadius = value / 2;
+    // 元のコード: const cssRadius = value / dpr / 2;
+    // ▲▲▲ 修正終わり ▲▲▲
 
-    // プレビュー表示
     setPreviewCircle({ radius: cssRadius, visible: true });
 
-    // 3秒後に非表示
     previewTimeoutRef.current = setTimeout(() => {
       setPreviewCircle(null);
       previewTimeoutRef.current = null;
     }, 3000);
   };
+
   return (
     <Box
       sx={{
@@ -583,7 +604,6 @@ const BlurTool = () => {
                 alt="logo"
                 priority
               />
-              {/* テキスト：PCのみ表示 */}
               <Typography
                 variant="body1"
                 sx={{
@@ -594,61 +614,7 @@ const BlurTool = () => {
                 画像ぼかし
               </Typography>
             </Link>
-            {/* <Button
-              startIcon={<UndoIcon />}
-              onClick={undoLastAction}
-              disabled={historyIndex <= 0}
-              variant="outlined"
-              color="primary"
-              sx={{
-                borderRadius: 2,
-                textTransform: "none",
-                // mr: { sm: 1 },
-              }}
-            >
-              {isMobile ? "" : "戻す (Ctrl+Z)"}
-            </Button>
-            <Button
-              startIcon={<RedoIcon />}
-              onClick={redoLastAction}
-              disabled={historyIndex >= canvasHistory.length - 1}
-              variant="outlined"
-              color="primary"
-              sx={{
-                borderRadius: 2,
-                textTransform: "none",
-              }}
-            >
-              {isMobile ? "" : "やり直す (Ctrl+Y)"}
-            </Button>
-            <Button
-              startIcon={<UploadIcon />}
-              onClick={() => fileInputRef.current?.click()}
-              variant="contained"
-              color="primary"
-              sx={{
-                borderRadius: 2,
-                textTransform: "none",
-                fontWeight: 600,
-              }}
-            >
-              {isMobile ? "" : "画像をアップロード"}
-            </Button> */}
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              {/* <Button
-                startIcon={<UndoIcon />}
-                onClick={undoLastAction}
-                disabled={historyIndex <= 0}
-                variant="outlined"
-                color="primary"
-                sx={{
-                  borderRadius: 2,
-                  textTransform: "none",
-                  // mr: { sm: 1 },
-                }}
-              >
-                {isMobile ? "" : "戻す (Ctrl+Z)"}
-              </Button> */}
               <Tooltip title="もとに戻す" arrow>
                 <IconButton
                   aria-label="元に戻す"
@@ -658,20 +624,7 @@ const BlurTool = () => {
                   <UndoIcon />
                 </IconButton>
               </Tooltip>
-              {/* <Button
-                startIcon={<RedoIcon />}
-                onClick={redoLastAction}
-                disabled={historyIndex >= canvasHistory.length - 1}
-                variant="outlined"
-                color="primary"
-                sx={{
-                  borderRadius: 2,
-                  textTransform: "none",
-                }}
-              >
-                {isMobile ? "" : "やり直す (Ctrl+Y)"}
-              </Button> */}
-              <Tooltip title="もとに戻す" arrow>
+              <Tooltip title="やり直す" arrow>
                 <IconButton
                   aria-label="やり直す"
                   onClick={redoLastAction}
@@ -680,19 +633,6 @@ const BlurTool = () => {
                   <RedoIcon />
                 </IconButton>
               </Tooltip>
-              {/* <Button
-                startIcon={<UploadIcon />}
-                onClick={() => fileInputRef.current?.click()}
-                variant="contained"
-                color="primary"
-                sx={{
-                  borderRadius: 2,
-                  textTransform: "none",
-                  fontWeight: 600,
-                }}
-              >
-                {isMobile ? "" : "画像をアップロード"}
-              </Button> */}
               <Tooltip title="画像を変更" arrow>
                 <IconButton
                   aria-label="画像を変更"
@@ -714,29 +654,6 @@ const BlurTool = () => {
       </AppBar>
 
       <Container maxWidth="lg" sx={{ mt: 4 }}>
-        {/* <Typography
-          variant="h4"
-          component="h1"
-          align="center"
-          gutterBottom
-          sx={{
-            fontWeight: 700,
-            color: "text.primary",
-          }}
-        >
-          個人情報を簡単に保護
-        </Typography> */}
-        {/* 
-        <Typography
-          variant="subtitle1"
-          align="center"
-          color="text.secondary"
-          sx={{ maxWidth: 700, mx: "auto" }}
-        >
-          画像をアップロードして、クリックまたはドラッグでぼかしをかけられます。
-          📤 画像をこのエリアにドラッグ＆ドロップでもアップロードできます。
-        </Typography> */}
-
         <Grid container spacing={3}>
           <Grid size={{ xs: 12, md: 12 }}>
             <Card
@@ -744,52 +661,9 @@ const BlurTool = () => {
               sx={{
                 borderRadius: 3,
                 overflow: "hidden",
-                // height: "100%",
               }}
             >
               <CardContent sx={{ p: 0 }}>
-                <Box
-                  sx={{
-                    // p: 2,
-                    bgcolor: "background.default",
-                    borderBottom: 1,
-                    borderColor: "divider",
-                  }}
-                >
-                  {/* <Grid container spacing={2} alignItems="center">
-                    <Grid size={{ xs: 12, sm: "auto" }}>
-                      <Button
-                        fullWidth
-                        variant="outlined"
-                        startIcon={<ResetIcon />}
-                        onClick={clearAll}
-                        sx={{
-                          borderRadius: 2,
-                          textTransform: "none",
-                        }}
-                      >
-                        クリア
-                      </Button>
-                    </Grid>
-                    <Grid size={{ xs: 12, sm: "auto" }}>
-                      <Button
-                        fullWidth
-                        variant="contained"
-                        startIcon={<DownloadIcon />}
-                        onClick={downloadImage}
-                        color="success"
-                        sx={{
-                          borderRadius: 2,
-                          textTransform: "none",
-                          fontWeight: 600,
-                        }}
-                      >
-                        ダウンロード
-                      </Button>
-                    </Grid>
-                  </Grid> */}
-                </Box>
-
                 <Box
                   sx={{
                     p: 2,
@@ -825,8 +699,7 @@ const BlurTool = () => {
                       </Typography>
                       <Slider
                         value={blurSize}
-                        onChange={handleBlurSizeChangeWithPreview} // ← 差し替え
-                        // onChange={handleBlurSizeChange}
+                        onChange={handleBlurSizeChangeWithPreview}
                         min={5}
                         max={300}
                         step={5}
@@ -867,41 +740,25 @@ const BlurTool = () => {
 
                 {/* ✅ ドラッグ＆ドロップ対応ラッパー */}
                 <Box
-                  // ドラッグイベントをラップ
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
-                  // sx={{
-                  //   p: 1,
-                  //   position: "relative",
-                  //   minHeight: { xs: 300, sm: 400, md: 500 },
-                  //   display: { xs: "none", sm: "flex" },
-                  //   justifyContent: "flex-end",
-                  //   alignItems: "center",
-                  //   flexWrap: "wrap",
-                  //   overflow: "hidden",
-                  //   // ✅ 正しく1回だけ bgcolor を定義
-                  //   bgcolor: isDragOver
-                  //     ? alpha(theme.palette.primary.main, 0.05)
-                  //     : "grey.100",
-                  //   border: isDragOver
-                  //     ? `3px dashed ${theme.palette.primary.main}`
-                  //     : "none",
-                  //   borderRadius: 2,
-                  //   transition: "border 0.2s ease",
-                  // }}
+                  sx={{
+                    position: "relative",
+                    bgcolor: isDragOver
+                      ? alpha(theme.palette.primary.main, 0.05)
+                      : "transparent",
+                  }}
                 >
                   {imageSrc ? (
                     <Box
                       sx={{
                         p: 1,
-                        // position: "relative", // 不要な場合が多いので削除
-                        // minHeight: { xs: 300, sm: 400, md: 500 }, // 高さを固定するとスマホで不自然になるので削除
-                        display: { xs: "flex", sm: "flex" }, // ← xs でも flex に変更！
-                        justifyContent: "center", // 中央揃えに変更（スマホ向け）
+                        display: { xs: "flex", sm: "flex" },
+                        flexDirection: "column",
+                        justifyContent: "center",
                         alignItems: "center",
-                        flexWrap: "wrap",
-                        overflow: "hidden",
+                        // overflow: "hidden", // 削除：親コンテナでスクロール制御するため
                         bgcolor: isDragOver
                           ? alpha(theme.palette.primary.main, 0.05)
                           : "grey.100",
@@ -910,16 +767,27 @@ const BlurTool = () => {
                           : "none",
                         borderRadius: 2,
                         transition: "border 0.2s ease",
+                        width: "100%",
                       }}
                     >
                       <Box
                         sx={{
                           display: "flex",
-                          justifyContent: "flex-end", // → ここがポイント
+                          justifyContent: "flex-end",
+                          alignItems: "center",
                           width: "100%",
                           mb: 1,
+                          gap: 1,
                         }}
                       >
+                        {/* ズーム倍率表示 */}
+                        <Typography
+                          variant="caption"
+                          sx={{ color: "text.secondary", mr: 2 }}
+                        >
+                          {(zoom * 100).toFixed(0)}%
+                        </Typography>
+
                         <Tooltip title="もとに戻す" arrow>
                           <IconButton
                             aria-label="元に戻す"
@@ -947,36 +815,65 @@ const BlurTool = () => {
                           </IconButton>
                         </Tooltip>
                       </Box>
-                      <canvas
-                        ref={canvasRef}
-                        onMouseDown={handleCanvasMouseDown}
-                        onMouseMove={handleCanvasMouseMove}
-                        onMouseUp={handleCanvasMouseUp}
-                        onMouseLeave={handleCanvasMouseUp}
-                        onTouchStart={handleCanvasMouseDown}
-                        onTouchMove={(e) => {
-                          e.preventDefault();
-                          handleCanvasMouseMove(e);
+
+                      {/* ▼▼▼ スクロールコンテナ（ここが重要） ▼▼▼ */}
+                      <Box
+                        ref={scrollContainerRef}
+                        sx={{
+                          width: "100%",
+                          maxHeight: "100vh", // 表示領域の高さ制限
+                          overflow: "auto", // 拡大時はスクロールバーを表示
+                          display: "flex", // コンテンツの配置
+                          justifyContent: "flex-start", // 左上基準で拡大するため
+                          alignItems: "flex-start",
+                          bgcolor: "#eee", // 画像外の背景色
+                          border: "1px solid",
+                          borderColor: "divider",
                         }}
-                        onTouchEnd={handleCanvasMouseUp}
-                        style={{
-                          maxWidth: "100%",
-                          maxHeight: "70vh", // スマホで高すぎないように制限
-                          cursor: isMouseDown ? "crosshair" : "crosshair",
-                          display: "block",
-                        }}
-                      />
-                      {/* </Box> */}
+                      >
+                        <canvas
+                          ref={canvasRef}
+                          onMouseDown={handleCanvasMouseDown}
+                          onMouseMove={handleCanvasMouseMove}
+                          onMouseUp={handleCanvasMouseUp}
+                          onMouseLeave={handleCanvasMouseUp}
+                          onTouchStart={handleCanvasMouseDown}
+                          onTouchMove={(e) => {
+                            e.preventDefault();
+                            handleCanvasMouseMove(e);
+                          }}
+                          onTouchEnd={handleCanvasMouseUp}
+                          style={{
+                            // ▼▼▼ 変更点 ▼▼▼
+
+                            // transformではなく、CSSのwidthでサイズを制御します。
+                            // zoom=1 のとき 100%（コンテナ幅にフィット）になります。
+                            // zoom=2 のとき 200% となり、親要素の overflow: auto によりスクロールバーが出現します。
+                            width: `${zoom * 100}%`,
+                            height: "auto", // アスペクト比を維持
+
+                            // 以下の transform 関連は削除します
+                            // transform: `scale(${zoom})`,
+                            // transformOrigin: "top left",
+
+                            // ▲▲▲ 変更点終わり ▲▲▲
+
+                            cursor: isMouseDown ? "crosshair" : "crosshair",
+                            display: "block",
+                          }}
+                        />
+                      </Box>
+                      {/* ▲▲▲ スクロールコンテナ終了 ▲▲▲ */}
                     </Box>
                   ) : (
-                    // ドラッグ＆ドロップ案内
+                    // ドラッグ＆ドロップ案内（変更なし）
                     <Box
                       sx={{
                         p: 1,
                         position: "relative",
-                        minHeight: { xs: 200, sm: 300, md: 400 }, // 高さを少し下げてスマホ対応
-                        display: { xs: "flex", sm: "flex" }, // ← xs でも flex に変更！
-                        justifyContent: "center", // 中央揃え
+                        minHeight: { xs: 200, sm: 300, md: 400 },
+                        display: { xs: "flex", sm: "flex" },
+                        justifyContent: "center",
                         alignItems: "center",
                         flexWrap: "wrap",
                         overflow: "hidden",
@@ -1106,239 +1003,7 @@ const BlurTool = () => {
                 </Box>
               </CardContent>
             </Card>
-
-            {/* <Paper
-              elevation={0}
-              sx={{
-                mt: 2,
-                p: 2,
-                borderRadius: 2,
-                bgcolor: "background.paper",
-                border: 1,
-                borderColor: "divider",
-              }}
-            >
-              <Typography
-                variant="subtitle2"
-                color="text.secondary"
-                gutterBottom
-              >
-                操作方法
-              </Typography>
-              <Grid container spacing={1}>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Box
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        bgcolor: "primary.main",
-                      }}
-                    />
-                    <Typography variant="body2">
-                      クリック or ドラッグでぼかし追加
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Box
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        bgcolor: "secondary.main",
-                      }}
-                    />
-                    <Typography variant="body2">
-                      同じ場所を複数回クリックで強度アップ
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Box
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        bgcolor: "error.main",
-                      }}
-                    />
-                    <Typography variant="body2">
-                      クリアボタンで全て削除
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Box
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        bgcolor: "success.main",
-                      }}
-                    />
-                    <Typography variant="body2">
-                      画像をエリアへドラッグ＆ドロップ
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Box
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        bgcolor: "info.main",
-                      }}
-                    />
-                    <Typography variant="body2">
-                      Ctrl+Z / Cmd+Z で元に戻す
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Box
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        bgcolor: "warning.main",
-                      }}
-                    />
-                    <Typography variant="body2">
-                      Ctrl+Y / Cmd+Y でやり直す
-                    </Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-            </Paper> */}
           </Grid>
-
-          {/* <Grid size={{ xs: 12, md: 4 }}>
-            <Card
-              elevation={3}
-              sx={{
-                borderRadius: 3,
-                height: "100%",
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              <CardContent>
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                  使い方ガイド
-                </Typography>
-
-                <List dense sx={{ mb: 2 }}>
-                  <ListItem>
-                    <ListItemText
-                      primary="1. 画像をアップロード"
-                      secondary="ドラッグ＆ドロップ or ボタンで"
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText
-                      primary="2. ぼかしを描く"
-                      secondary="クリックで1点、ドラッグで線状に追加"
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText
-                      primary="3. 調整"
-                      secondary="強度とサイズをスライダーで調整"
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText
-                      primary="4. 保存"
-                      secondary="完成画像をダウンロード"
-                    />
-                  </ListItem>
-                </List>
-
-                <Divider sx={{ my: 2 }} />
-
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                  ヒント
-                </Typography>
-
-                <List dense>
-                  <ListItem>
-                    <ListItemText
-                      primary="ブラシのように塗りつぶす"
-                      secondary="同じ場所を何度も塗るとより強いぼかしになります"
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText
-                      primary="ドラッグで面を塗る"
-                      secondary="文字やロゴ全体を一気にぼかせます"
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText
-                      primary="自然な印象"
-                      secondary="モザイクより柔らかい仕上がり"
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText
-                      primary="個人情報保護"
-                      secondary="顔、住所、電話番号などを隠すのに最適"
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText
-                      primary="誤操作しても安心"
-                      secondary="Ctrl+Zでいつでも1ステップ戻せます"
-                    />
-                  </ListItem>
-                  <ListItem>
-                    <ListItemText
-                      primary="やり直しも可能"
-                      secondary="Ctrl+Yでやり直せます"
-                    />
-                  </ListItem>
-                </List>
-              </CardContent>
-
-              <Box
-                sx={{
-                  mt: "auto",
-                  pt: 2,
-                  borderTop: 1,
-                  borderColor: "divider",
-                }}
-              >
-                <CardContent>
-                  <Typography
-                    variant="h6"
-                    gutterBottom
-                    sx={{ fontWeight: 600 }}
-                  >
-                    ブラシぼかし
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    color="text.secondary"
-                    sx={{ mb: 1 }}
-                  >
-                    このツールはブラシのようにぼかしを塗りつぶすことができます。
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    同じ場所を何度も塗ることで、より強いぼかし効果を得られます。
-                    誤って塗ってしまった場合は、Ctrl+Zで元に戻せます。
-                  </Typography>
-                </CardContent>
-              </Box>
-            </Card>
-          </Grid> */}
         </Grid>
 
         <Box sx={{ mt: 4, textAlign: "center" }}>
