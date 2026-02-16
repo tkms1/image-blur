@@ -39,22 +39,19 @@ const BlurTool = () => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isDragOver, setIsDragOver] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const originalImageRef = useRef<HTMLImageElement | null>(null);
   const workingCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // ▼▼▼ ズーム機能用の State と Ref ▼▼▼
   const [zoom, setZoom] = useState(1);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   // ▲▲▲ 追加終わり ▲▲▲
 
   const [blurRadius, setBlurRadius] = useState(20);
   const [blurSize, setBlurSize] = useState(50);
-
-  // 【修正】useState から useRef に変更（パフォーマンス向上＆コンパイラエラー回避）
-  const lastDrawTimeRef = useRef<number>(0);
-
+  const [lastDrawTime, setLastDrawTime] = useState(0);
   const [previewCircle, setPreviewCircle] = useState<{
     radius: number;
     visible: boolean;
@@ -67,6 +64,10 @@ const BlurTool = () => {
   const [canvasHistory, setCanvasHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const maxHistorySteps = 50;
+
+  // ▼▼▼ スマホ描画用 Ref (スクロール制御用) ▼▼▼
+  const isDrawingRef = useRef(false);
+  // ▲▲▲ 追加終わり ▲▲▲
 
   // ===== キャンバス状態を保存 =====
   const saveCanvasState = useCallback(() => {
@@ -187,17 +188,10 @@ const BlurTool = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(workingCanvas, 0, 0);
 
-      // 履歴保存
-      const workingCanvasForHistory = workingCanvasRef.current;
-      if (workingCanvasForHistory) {
-        const dataUrl = workingCanvasForHistory.toDataURL();
-        setCanvasHistory([dataUrl]);
-        setHistoryIndex(0);
-      }
+      saveCanvasState();
     };
 
     img.src = imageSrc;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageSrc]);
 
   // ===== キーボードショートカット =====
@@ -244,7 +238,6 @@ const BlurTool = () => {
       container.removeEventListener("wheel", handleWheel);
     };
   }, [imageSrc]);
-  // ▲▲▲ 追加終わり ▲▲▲
 
   // ===== ファイルアップロード処理 =====
   const processFile = (file: File) => {
@@ -258,7 +251,6 @@ const BlurTool = () => {
       if (event.target?.result && typeof event.target.result === "string") {
         setImageSrc(event.target.result);
         setZoom(1);
-        lastDrawTimeRef.current = 0; // タイマーリセット
 
         if (workingCanvasRef.current) {
           const workingCanvas = workingCanvasRef.current;
@@ -332,134 +324,124 @@ const BlurTool = () => {
     return { x, y };
   };
 
-  // ===== ブラシぼかし適用（修正版） =====
-  const applyBlurAt = useCallback(
-    (x: number, y: number) => {
-      if (
-        !workingCanvasRef.current ||
-        !originalImageRef.current ||
-        !canvasRef.current
-      )
-        return;
+  // ===== ブラシぼかし適用 =====
+  const applyBlurAt = (x: number, y: number) => {
+    if (
+      !workingCanvasRef.current ||
+      !originalImageRef.current ||
+      !canvasRef.current
+    )
+      return;
 
-      const workingCanvas = workingCanvasRef.current;
-      const workingCtx = workingCanvas.getContext("2d");
-      if (!workingCtx) return;
+    const workingCanvas = workingCanvasRef.current;
+    const workingCtx = workingCanvas.getContext("2d");
+    if (!workingCtx) return;
 
-      const displayScale = getCanvasDisplayScale();
-      const physicalBlurSize = blurSize / displayScale;
-      const radius = physicalBlurSize / 2;
+    const displayScale = getCanvasDisplayScale();
+    const physicalBlurSize = blurSize / displayScale;
+    const radius = physicalBlurSize / 2;
 
-      const padding = blurRadius * 3;
-      const bufferSize = physicalBlurSize + padding * 2;
+    const padding = blurRadius * 3;
+    const bufferSize = physicalBlurSize + padding * 2;
 
-      const blurCanvas = document.createElement("canvas");
-      blurCanvas.width = bufferSize;
-      blurCanvas.height = bufferSize;
-      const blurCtx = blurCanvas.getContext("2d");
-      if (!blurCtx) return;
+    const blurCanvas = document.createElement("canvas");
+    blurCanvas.width = bufferSize;
+    blurCanvas.height = bufferSize;
+    const blurCtx = blurCanvas.getContext("2d");
+    if (!blurCtx) return;
 
-      blurCtx.filter = `blur(${blurRadius}px)`;
+    blurCtx.filter = `blur(${blurRadius}px)`;
 
-      const srcX = x - radius - padding;
-      const srcY = y - radius - padding;
+    const srcX = x - radius - padding;
+    const srcY = y - radius - padding;
 
-      blurCtx.drawImage(
-        workingCanvas,
-        srcX,
-        srcY,
-        bufferSize,
-        bufferSize,
-        0,
-        0,
-        bufferSize,
-        bufferSize,
-      );
+    blurCtx.drawImage(
+      workingCanvas,
+      srcX,
+      srcY,
+      bufferSize,
+      bufferSize,
+      0,
+      0,
+      bufferSize,
+      bufferSize,
+    );
 
-      workingCtx.save();
-      workingCtx.beginPath();
-      workingCtx.arc(x, y, radius, 0, Math.PI * 2);
-      workingCtx.closePath();
-      workingCtx.clip();
+    workingCtx.save();
 
-      workingCtx.globalCompositeOperation = "source-over";
-      workingCtx.drawImage(
-        blurCanvas,
-        padding,
-        padding,
-        physicalBlurSize,
-        physicalBlurSize,
-        x - radius,
-        y - radius,
-        physicalBlurSize,
-        physicalBlurSize,
-      );
-      workingCtx.restore();
+    workingCtx.beginPath();
+    workingCtx.arc(x, y, radius, 0, Math.PI * 2);
+    workingCtx.closePath();
+    workingCtx.clip();
 
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(workingCanvas, 0, 0);
-      }
+    workingCtx.globalCompositeOperation = "source-over";
+    workingCtx.drawImage(
+      blurCanvas,
+      padding,
+      padding,
+      physicalBlurSize,
+      physicalBlurSize,
+      x - radius,
+      y - radius,
+      physicalBlurSize,
+      physicalBlurSize,
+    );
 
-      // 履歴保存（300ms ごと）
-      const now = Date.now();
-      if (now - lastDrawTimeRef.current > 300) {
-        saveCanvasState();
-        lastDrawTimeRef.current = now;
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    },
-    [blurSize, blurRadius, saveCanvasState],
-  );
+    workingCtx.restore();
 
-  // ===== キャンバス操作ハンドラ（修正版） =====
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(workingCanvas, 0, 0);
+    }
+
+    const now = Date.now();
+    if (now - lastDrawTime > 300) {
+      saveCanvasState();
+      setLastDrawTime(now);
+    }
+  };
+
+  // ===== キャンバス操作ハンドラ =====
   const handleCanvasMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
     if (!imageSrc) return;
-    const { x, y } = getClientPos(e);
-    const coords = getCanvasCoords(x, y);
 
+    // 描画状態を Ref に即時反映 (スクロール制御用)
+    isDrawingRef.current = true;
     setIsMouseDown(true);
+
+    const coords =
+      "touches" in e
+        ? getCanvasCoords(e.touches[0].clientX, e.touches[0].clientY)
+        : getCanvasCoords(e.clientX, e.clientY);
+
     setMousePos(coords);
     applyBlurAt(coords.x, coords.y);
   };
 
-  // 【修正】useCallback で囲み、Date.now() に ESLint 無視コメントを追加
-  const handleCanvasMouseMove = useCallback(
-    (e: React.MouseEvent | React.TouchEvent) => {
-      if (!imageSrc) return;
+  const handleCanvasMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!imageSrc) return;
+    const coords =
+      "touches" in e
+        ? getCanvasCoords(e.touches[0].clientX, e.touches[0].clientY)
+        : getCanvasCoords(e.clientX, e.clientY);
 
-      const { x, y } = getClientPos(e);
-      const coords = getCanvasCoords(x, y);
+    setMousePos(coords);
 
-      setMousePos(coords);
-
-      if (isMouseDown) {
-        const now = Date.now();
-        // 描画間隔の調整
-        if (now - lastDrawTimeRef.current > 20) {
-          applyBlurAt(coords.x, coords.y);
-          lastDrawTimeRef.current = now;
-        }
+    if (isMouseDown) {
+      const now = Date.now();
+      // スマホでは連続描画の閾値を少し緩くしても良いが、50ms は妥当
+      if (now - lastDrawTime > 50) {
+        applyBlurAt(coords.x, coords.y);
+        setLastDrawTime(now);
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    },
-    [imageSrc, isMouseDown, applyBlurAt],
-  );
-
-  const getClientPos = (e: React.MouseEvent | React.TouchEvent) => {
-    if ("touches" in e) {
-      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
     }
-    return {
-      x: (e as React.MouseEvent).clientX,
-      y: (e as React.MouseEvent).clientY,
-    };
   };
 
   const handleCanvasMouseUp = () => {
     setIsMouseDown(false);
+    isDrawingRef.current = false; // 描画終了
     saveCanvasState();
   };
 
@@ -784,18 +766,24 @@ const BlurTool = () => {
                           onMouseMove={handleCanvasMouseMove}
                           onMouseUp={handleCanvasMouseUp}
                           onMouseLeave={handleCanvasMouseUp}
+                          // ▼▼▼ スマホ用タッチイベント処理 ▼▼▼
                           onTouchStart={handleCanvasMouseDown}
                           onTouchMove={(e) => {
-                            if (e.cancelable) e.preventDefault();
+                            // 描画中 (isDrawingRef.current) の場合のみスクロールを防止
+                            if (isDrawingRef.current) {
+                              e.preventDefault();
+                            }
                             handleCanvasMouseMove(e);
                           }}
                           onTouchEnd={handleCanvasMouseUp}
+                          // ▲▲▲ 追加終わり ▲▲▲
                           style={{
                             width: `${zoom * 100}%`,
                             height: "auto",
                             cursor: isMouseDown ? "crosshair" : "crosshair",
                             display: "block",
-                            touchAction: "none",
+                            // スマホでの描画をスムーズにするための設定
+                            touchAction: isMobile ? "none" : "auto",
                           }}
                         />
                       </Box>
