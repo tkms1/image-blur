@@ -1,0 +1,25 @@
+# Dockerfile.fly
+FROM node:21.7.3-bookworm
+
+ENV PROJECT /app
+WORKDIR ${PROJECT}
+
+# Next.jsのテレメトリを無効化（ビルド速度向上とハング防止）
+ENV NEXT_TELEMETRY_DISABLED 1
+# 本番環境設定
+ENV NODE_ENV production
+
+# 先に package.json だけコピーして依存関係をインストール（キャッシュ効率化）
+COPY package*.json ./
+RUN npm install
+
+# ソースコードをコピー
+COPY . .
+
+# ビルド実行
+RUN npm run build
+
+# ポート公開
+EXPOSE 3000
+
+CMD ["npm", "run", "start"]

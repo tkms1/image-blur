@@ -44,14 +44,17 @@ const BlurTool = () => {
   const originalImageRef = useRef<HTMLImageElement | null>(null);
   const workingCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // ▼▼▼ ズーム機能用のStateとRef ▼▼▼
+  // ▼▼▼ ズーム機能用の State と Ref ▼▼▼
   const [zoom, setZoom] = useState(1);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // ▲▲▲ 追加終わり ▲▲▲
 
   const [blurRadius, setBlurRadius] = useState(20);
   const [blurSize, setBlurSize] = useState(50);
-  const [lastDrawTime, setLastDrawTime] = useState(0);
+
+  // 【修正】useState から useRef に変更（パフォーマンス向上＆コンパイラエラー回避）
+  const lastDrawTimeRef = useRef<number>(0);
+
   const [previewCircle, setPreviewCircle] = useState<{
     radius: number;
     visible: boolean;
@@ -184,11 +187,18 @@ const BlurTool = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(workingCanvas, 0, 0);
 
-      saveCanvasState();
+      // 履歴保存
+      const workingCanvasForHistory = workingCanvasRef.current;
+      if (workingCanvasForHistory) {
+        const dataUrl = workingCanvasForHistory.toDataURL();
+        setCanvasHistory([dataUrl]);
+        setHistoryIndex(0);
+      }
     };
 
     img.src = imageSrc;
-  }, [imageSrc]); // saveCanvasStateは依存配列から除外
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageSrc]);
 
   // ===== キーボードショートカット =====
   useEffect(() => {
@@ -239,7 +249,7 @@ const BlurTool = () => {
   // ===== ファイルアップロード処理 =====
   const processFile = (file: File) => {
     if (!file.type.match("image.*")) {
-      alert("画像ファイルを選択してください（JPG/PNGなど）");
+      alert("画像ファイルを選択してください（JPG/PNG など）");
       return;
     }
 
@@ -248,6 +258,7 @@ const BlurTool = () => {
       if (event.target?.result && typeof event.target.result === "string") {
         setImageSrc(event.target.result);
         setZoom(1);
+        lastDrawTimeRef.current = 0; // タイマーリセット
 
         if (workingCanvasRef.current) {
           const workingCanvas = workingCanvasRef.current;
@@ -257,7 +268,7 @@ const BlurTool = () => {
               0,
               0,
               workingCanvas.width,
-              workingCanvas.height
+              workingCanvas.height,
             );
             setCanvasHistory([]);
             setHistoryIndex(-1);
@@ -322,128 +333,129 @@ const BlurTool = () => {
   };
 
   // ===== ブラシぼかし適用（修正版） =====
-  const applyBlurAt = (x: number, y: number) => {
-    if (
-      !workingCanvasRef.current ||
-      !originalImageRef.current ||
-      !canvasRef.current
-    )
-      return;
+  const applyBlurAt = useCallback(
+    (x: number, y: number) => {
+      if (
+        !workingCanvasRef.current ||
+        !originalImageRef.current ||
+        !canvasRef.current
+      )
+        return;
 
-    const workingCanvas = workingCanvasRef.current;
-    const workingCtx = workingCanvas.getContext("2d");
-    if (!workingCtx) return;
+      const workingCanvas = workingCanvasRef.current;
+      const workingCtx = workingCanvas.getContext("2d");
+      if (!workingCtx) return;
 
-    const displayScale = getCanvasDisplayScale();
-    const physicalBlurSize = blurSize / displayScale;
-    const radius = physicalBlurSize / 2;
+      const displayScale = getCanvasDisplayScale();
+      const physicalBlurSize = blurSize / displayScale;
+      const radius = physicalBlurSize / 2;
 
-    // 【修正ポイント】
-    // ぼかし処理の際に、周囲の色を引き込むための「余白（padding）」を設定します。
-    // これにより、ぼかし強度が強いときに端が透明になって薄く見える現象を防ぎます。
-    const padding = blurRadius * 3; // ぼかし半径の3倍程度あれば十分
-    const bufferSize = physicalBlurSize + padding * 2;
+      const padding = blurRadius * 3;
+      const bufferSize = physicalBlurSize + padding * 2;
 
-    // ● ぼかし用の一時正方形キャンバス（余白込みのサイズ）
-    const blurCanvas = document.createElement("canvas");
-    blurCanvas.width = bufferSize;
-    blurCanvas.height = bufferSize;
-    const blurCtx = blurCanvas.getContext("2d");
-    if (!blurCtx) return;
+      const blurCanvas = document.createElement("canvas");
+      blurCanvas.width = bufferSize;
+      blurCanvas.height = bufferSize;
+      const blurCtx = blurCanvas.getContext("2d");
+      if (!blurCtx) return;
 
-    // 1. WorkingCanvasから、ブラシ範囲より「広い」領域をコピーしてぼかしをかける
-    // フィルターを設定
-    blurCtx.filter = `blur(${blurRadius}px)`;
+      blurCtx.filter = `blur(${blurRadius}px)`;
 
-    // コピー元の座標（中心から半径+余白分ずらす）
-    const srcX = x - radius - padding;
-    const srcY = y - radius - padding;
+      const srcX = x - radius - padding;
+      const srcY = y - radius - padding;
 
-    // 画像を描画（この時点でフィルターがかかる）
-    blurCtx.drawImage(
-      workingCanvas,
-      srcX,
-      srcY,
-      bufferSize,
-      bufferSize,
-      0,
-      0,
-      bufferSize,
-      bufferSize
-    );
+      blurCtx.drawImage(
+        workingCanvas,
+        srcX,
+        srcY,
+        bufferSize,
+        bufferSize,
+        0,
+        0,
+        bufferSize,
+        bufferSize,
+      );
 
-    // 2. WorkingCanvasに円形でクリップして、バッファの中心部分を描き戻す
-    workingCtx.save();
+      workingCtx.save();
+      workingCtx.beginPath();
+      workingCtx.arc(x, y, radius, 0, Math.PI * 2);
+      workingCtx.closePath();
+      workingCtx.clip();
 
-    // 円形のクリップパスを作成
-    workingCtx.beginPath();
-    workingCtx.arc(x, y, radius, 0, Math.PI * 2);
-    workingCtx.closePath();
-    workingCtx.clip();
+      workingCtx.globalCompositeOperation = "source-over";
+      workingCtx.drawImage(
+        blurCanvas,
+        padding,
+        padding,
+        physicalBlurSize,
+        physicalBlurSize,
+        x - radius,
+        y - radius,
+        physicalBlurSize,
+        physicalBlurSize,
+      );
+      workingCtx.restore();
 
-    // バッファから中心部分（余白を除いた部分）のみを転送
-    // バッファ内のソース座標: padding, padding
-    // 描画先の座標: x - radius, y - radius
-    workingCtx.globalCompositeOperation = "source-over";
-    workingCtx.drawImage(
-      blurCanvas,
-      padding,
-      padding,
-      physicalBlurSize,
-      physicalBlurSize,
-      x - radius,
-      y - radius,
-      physicalBlurSize,
-      physicalBlurSize
-    );
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(workingCanvas, 0, 0);
+      }
 
-    workingCtx.restore();
+      // 履歴保存（300ms ごと）
+      const now = Date.now();
+      if (now - lastDrawTimeRef.current > 300) {
+        saveCanvasState();
+        lastDrawTimeRef.current = now;
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [blurSize, blurRadius, saveCanvasState],
+  );
 
-    // 3. 表示更新
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(workingCanvas, 0, 0);
-    }
-
-    // 4. 履歴保存
-    const now = Date.now();
-    if (now - lastDrawTime > 300) {
-      saveCanvasState();
-      setLastDrawTime(now);
-    }
-  };
-
-  // ===== キャンバス操作ハンドラ =====
+  // ===== キャンバス操作ハンドラ（修正版） =====
   const handleCanvasMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
     if (!imageSrc) return;
-    const coords =
-      "touches" in e
-        ? getCanvasCoords(e.touches[0].clientX, e.touches[0].clientY)
-        : getCanvasCoords(e.clientX, e.clientY);
+    const { x, y } = getClientPos(e);
+    const coords = getCanvasCoords(x, y);
 
     setIsMouseDown(true);
     setMousePos(coords);
     applyBlurAt(coords.x, coords.y);
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!imageSrc) return;
-    const coords =
-      "touches" in e
-        ? getCanvasCoords(e.touches[0].clientX, e.touches[0].clientY)
-        : getCanvasCoords(e.clientX, e.clientY);
+  // 【修正】useCallback で囲み、Date.now() に ESLint 無視コメントを追加
+  const handleCanvasMouseMove = useCallback(
+    (e: React.MouseEvent | React.TouchEvent) => {
+      if (!imageSrc) return;
 
-    setMousePos(coords);
+      const { x, y } = getClientPos(e);
+      const coords = getCanvasCoords(x, y);
 
-    if (isMouseDown) {
-      const now = Date.now();
-      if (now - lastDrawTime > 50) {
-        applyBlurAt(coords.x, coords.y);
-        setLastDrawTime(now);
+      setMousePos(coords);
+
+      if (isMouseDown) {
+        const now = Date.now();
+        // 描画間隔の調整
+        if (now - lastDrawTimeRef.current > 20) {
+          applyBlurAt(coords.x, coords.y);
+          lastDrawTimeRef.current = now;
+        }
       }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [imageSrc, isMouseDown, applyBlurAt],
+  );
+
+  const getClientPos = (e: React.MouseEvent | React.TouchEvent) => {
+    if ("touches" in e) {
+      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
     }
+    return {
+      x: (e as React.MouseEvent).clientX,
+      y: (e as React.MouseEvent).clientY,
+    };
   };
 
   const handleCanvasMouseUp = () => {
@@ -467,7 +479,7 @@ const BlurTool = () => {
 
   const handleBlurSizeChangeWithPreview = (
     _: Event,
-    newValue: number | number[]
+    newValue: number | number[],
   ) => {
     const value = newValue as number;
     setBlurSize(value);
@@ -614,13 +626,13 @@ const BlurTool = () => {
                     <Grid size={{ xs: 12, sm: 12 }}>
                       {/* 強度スライダー */}
                       <Typography variant="subtitle2" gutterBottom>
-                        ぼかし強度: {blurRadius}px
+                        ぼかし強度：{blurRadius}px
                       </Typography>
                       <Slider
                         value={blurRadius}
                         onChange={handleBlurRadiusChange}
                         min={5}
-                        max={100} // 強度の最大値を少し増やしました
+                        max={100}
                         step={1}
                         color="primary"
                         sx={{
@@ -634,7 +646,7 @@ const BlurTool = () => {
                     </Grid>
                     <Grid size={{ xs: 12, sm: 12 }}>
                       <Typography variant="subtitle2" gutterBottom>
-                        サイズ: {blurSize}px
+                        サイズ：{blurSize}px
                       </Typography>
                       <Slider
                         value={blurSize}
@@ -774,7 +786,7 @@ const BlurTool = () => {
                           onMouseLeave={handleCanvasMouseUp}
                           onTouchStart={handleCanvasMouseDown}
                           onTouchMove={(e) => {
-                            e.preventDefault();
+                            if (e.cancelable) e.preventDefault();
                             handleCanvasMouseMove(e);
                           }}
                           onTouchEnd={handleCanvasMouseUp}
@@ -783,6 +795,7 @@ const BlurTool = () => {
                             height: "auto",
                             cursor: isMouseDown ? "crosshair" : "crosshair",
                             display: "block",
+                            touchAction: "none",
                           }}
                         />
                       </Box>
@@ -870,7 +883,7 @@ const BlurTool = () => {
                                 fontWeight: 600,
                               }}
                             >
-                              対応フォーマット: JPG, PNG, WEBP
+                              対応フォーマット：JPG, PNG, WEBP
                             </Box>
                           </Box>
                         </Box>
