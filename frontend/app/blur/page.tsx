@@ -31,11 +31,16 @@ import Link from "next/link";
 const BlurTool = () => {
   const theme = useTheme();
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [isMouseDown, setIsMouseDown] = useState(false);
+
+  // 描画状態の管理には Ref を使用（State は遅延するため）
+  const isDrawingRef = useRef(false);
+  const [isMouseDown, setIsMouseDown] = useState(false); // UI 表示用
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isDragOver, setIsDragOver] = useState(false);
@@ -64,10 +69,6 @@ const BlurTool = () => {
   const [canvasHistory, setCanvasHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const maxHistorySteps = 50;
-
-  // ▼▼▼ スマホ描画用 Ref (スクロール制御用) ▼▼▼
-  const isDrawingRef = useRef(false);
-  // ▲▲▲ 追加終わり ▲▲▲
 
   // ===== キャンバス状態を保存 =====
   const saveCanvasState = useCallback(() => {
@@ -404,58 +405,61 @@ const BlurTool = () => {
   };
 
   // ===== キャンバス操作ハンドラ =====
-  const handleCanvasMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
+  const startDrawing = (clientX: number, clientY: number) => {
     if (!imageSrc) return;
-
-    // 描画状態を Ref に即時反映 (スクロール制御用)
     isDrawingRef.current = true;
     setIsMouseDown(true);
-
-    // ▼▼▼ 実機対策：タッチイベントのデフォルト動作（スクロール等）を防止 ▼▼▼
-    if ("touches" in e) {
-      // TypeScript の型エラーを回避しつつ preventDefault を実行
-      (e as unknown as TouchEvent).preventDefault();
-    }
-    // ▲▲▲ 追加終わり ▲▲▲
-
-    const coords =
-      "touches" in e
-        ? getCanvasCoords(e.touches[0].clientX, e.touches[0].clientY)
-        : getCanvasCoords(e.clientX, e.clientY);
-
+    const coords = getCanvasCoords(clientX, clientY);
     setMousePos(coords);
     applyBlurAt(coords.x, coords.y);
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!imageSrc) return;
-
-    // ▼▼▼ 実機対策：タッチイベントのデフォルト動作（スクロール等）を防止 ▼▼▼
-    if ("touches" in e && isDrawingRef.current) {
-      (e as unknown as TouchEvent).preventDefault();
-    }
-    // ▲▲▲ 追加終わり ▲▲▲
-
-    const coords =
-      "touches" in e
-        ? getCanvasCoords(e.touches[0].clientX, e.touches[0].clientY)
-        : getCanvasCoords(e.clientX, e.clientY);
-
+  const moveDrawing = (clientX: number, clientY: number) => {
+    if (!imageSrc || !isDrawingRef.current) return;
+    const coords = getCanvasCoords(clientX, clientY);
     setMousePos(coords);
 
-    if (isMouseDown) {
-      const now = Date.now();
-      if (now - lastDrawTime > 50) {
-        applyBlurAt(coords.x, coords.y);
-        setLastDrawTime(now);
-      }
+    const now = Date.now();
+    if (now - lastDrawTime > 50) {
+      applyBlurAt(coords.x, coords.y);
+      setLastDrawTime(now);
     }
   };
 
-  const handleCanvasMouseUp = () => {
+  const stopDrawing = () => {
+    isDrawingRef.current = false;
     setIsMouseDown(false);
-    isDrawingRef.current = false; // 描画終了
     saveCanvasState();
+  };
+
+  // マウスイベント
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    startDrawing(e.clientX, e.clientY);
+  };
+  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+    moveDrawing(e.clientX, e.clientY);
+  };
+
+  // タッチイベント（実機対策）
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // スクロール防止
+    e.preventDefault();
+    if (e.touches.length > 0) {
+      startDrawing(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    // 必須：スクロール防止
+    e.preventDefault();
+    if (e.touches.length > 0) {
+      moveDrawing(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    e.preventDefault();
+    stopDrawing();
   };
 
   // ===== ダウンロード =====
@@ -777,20 +781,23 @@ const BlurTool = () => {
                           ref={canvasRef}
                           onMouseDown={handleCanvasMouseDown}
                           onMouseMove={handleCanvasMouseMove}
-                          onMouseUp={handleCanvasMouseUp}
-                          onMouseLeave={handleCanvasMouseUp}
+                          onMouseUp={stopDrawing}
+                          onMouseLeave={stopDrawing}
                           // ▼▼▼ スマホ用タッチイベント処理（修正版） ▼▼▼
-                          onTouchStart={handleCanvasMouseDown}
-                          onTouchMove={handleCanvasMouseMove}
-                          onTouchEnd={handleCanvasMouseUp}
+                          onTouchStart={handleTouchStart}
+                          onTouchMove={handleTouchMove}
+                          onTouchEnd={handleTouchEnd}
                           // ▲▲▲ 追加終わり ▲▲▲
                           style={{
                             width: `${zoom * 100}%`,
                             height: "auto",
                             cursor: isMouseDown ? "crosshair" : "crosshair",
                             display: "block",
-                            // 重要：キャンバス上のタッチ操作（スクロールやズーム）を無効化
+                            // 重要：タッチによるスクロールとズームを完全に無効化
                             touchAction: "none",
+                            WebkitTouchCallout: "none",
+                            WebkitUserSelect: "none",
+                            userSelect: "none",
                           }}
                         />
                       </Box>
