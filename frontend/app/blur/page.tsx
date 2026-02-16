@@ -411,17 +411,31 @@ const BlurTool = () => {
     isDrawingRef.current = true;
     setIsMouseDown(true);
 
+    // ▼▼▼ 実機対策：タッチイベントのデフォルト動作（スクロール等）を防止 ▼▼▼
+    if ("touches" in e) {
+      // TypeScript の型エラーを回避しつつ preventDefault を実行
+      (e as unknown as TouchEvent).preventDefault();
+    }
+    // ▲▲▲ 追加終わり ▲▲▲
+
     const coords =
       "touches" in e
         ? getCanvasCoords(e.touches[0].clientX, e.touches[0].clientY)
         : getCanvasCoords(e.clientX, e.clientY);
-    console.log("touch");
+
     setMousePos(coords);
     applyBlurAt(coords.x, coords.y);
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
     if (!imageSrc) return;
+
+    // ▼▼▼ 実機対策：タッチイベントのデフォルト動作（スクロール等）を防止 ▼▼▼
+    if ("touches" in e && isDrawingRef.current) {
+      (e as unknown as TouchEvent).preventDefault();
+    }
+    // ▲▲▲ 追加終わり ▲▲▲
+
     const coords =
       "touches" in e
         ? getCanvasCoords(e.touches[0].clientX, e.touches[0].clientY)
@@ -431,11 +445,9 @@ const BlurTool = () => {
 
     if (isMouseDown) {
       const now = Date.now();
-      // スマホでは連続描画の閾値を少し緩くしても良いが、50ms は妥当
       if (now - lastDrawTime > 50) {
         applyBlurAt(coords.x, coords.y);
         setLastDrawTime(now);
-        console.log("move");
       }
     }
   };
@@ -767,15 +779,9 @@ const BlurTool = () => {
                           onMouseMove={handleCanvasMouseMove}
                           onMouseUp={handleCanvasMouseUp}
                           onMouseLeave={handleCanvasMouseUp}
-                          // ▼▼▼ スマホ用タッチイベント処理 ▼▼▼
+                          // ▼▼▼ スマホ用タッチイベント処理（修正版） ▼▼▼
                           onTouchStart={handleCanvasMouseDown}
-                          onTouchMove={(e) => {
-                            // 描画中 (isDrawingRef.current) の場合のみスクロールを防止
-                            // if (isDrawingRef.current) {
-                            //   e.preventDefault();
-                            // }
-                            handleCanvasMouseMove(e);
-                          }}
+                          onTouchMove={handleCanvasMouseMove}
                           onTouchEnd={handleCanvasMouseUp}
                           // ▲▲▲ 追加終わり ▲▲▲
                           style={{
@@ -783,8 +789,8 @@ const BlurTool = () => {
                             height: "auto",
                             cursor: isMouseDown ? "crosshair" : "crosshair",
                             display: "block",
-                            // スマホでの描画をスムーズにするための設定
-                            touchAction: isMobile ? "none" : "auto",
+                            // 重要：キャンバス上のタッチ操作（スクロールやズーム）を無効化
+                            touchAction: "none",
                           }}
                         />
                       </Box>
