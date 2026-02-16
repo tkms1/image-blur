@@ -30,7 +30,7 @@ import Link from "next/link";
 
 const BlurTool = () => {
   const theme = useTheme();
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -415,7 +415,7 @@ const BlurTool = () => {
       "touches" in e
         ? getCanvasCoords(e.touches[0].clientX, e.touches[0].clientY)
         : getCanvasCoords(e.clientX, e.clientY);
-
+    console.log("touch");
     setMousePos(coords);
     applyBlurAt(coords.x, coords.y);
   };
@@ -435,6 +435,7 @@ const BlurTool = () => {
       if (now - lastDrawTime > 50) {
         applyBlurAt(coords.x, coords.y);
         setLastDrawTime(now);
+        console.log("move");
       }
     }
   };
@@ -770,9 +771,9 @@ const BlurTool = () => {
                           onTouchStart={handleCanvasMouseDown}
                           onTouchMove={(e) => {
                             // 描画中 (isDrawingRef.current) の場合のみスクロールを防止
-                            if (isDrawingRef.current) {
-                              e.preventDefault();
-                            }
+                            // if (isDrawingRef.current) {
+                            //   e.preventDefault();
+                            // }
                             handleCanvasMouseMove(e);
                           }}
                           onTouchEnd={handleCanvasMouseUp}
