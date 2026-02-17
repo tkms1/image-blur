@@ -1,0 +1,617 @@
+"use client";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import {
+  Box,
+  Typography,
+  Card,
+  CardContent,
+  Slider,
+  IconButton,
+  useTheme,
+  AppBar,
+  Toolbar,
+  Container,
+  Button,
+} from "@mui/material";
+import {
+  Download as DownloadIcon,
+  Undo as UndoIcon,
+  Redo as RedoIcon,
+} from "@mui/icons-material";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
+import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
+
+import NextImage from "next/image";
+import Link from "next/link";
+
+const MobileBlurTool = () => {
+  const theme = useTheme();
+
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
+
+  // 描画状態の管理
+  const isDrawingRef = useRef(false);
+
+  // 座標・キャンバス参照
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const originalImageRef = useRef<HTMLImageElement | null>(null);
+  const workingCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // 設定値
+  const [blurRadius, setBlurRadius] = useState(20);
+  const [blurSize, setBlurSize] = useState(40); // スマホ向けに初期サイズを少し小さく
+  const [lastDrawTime, setLastDrawTime] = useState(0);
+
+  // プレビュー用サークル
+  const [previewCircle, setPreviewCircle] = useState<{
+    radius: number;
+    visible: boolean;
+  } | null>(null);
+  const previewTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 履歴管理 (Undo/Redo)
+  const [canvasHistory, setCanvasHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const maxHistorySteps = 30; // スマホのメモリを考慮して少し減らす
+
+  // ===== キャンバス状態を保存 =====
+  const saveCanvasState = useCallback(() => {
+    if (!workingCanvasRef.current) return;
+
+    const workingCanvas = workingCanvasRef.current;
+    const dataUrl = workingCanvas.toDataURL();
+
+    setCanvasHistory((prev) => {
+      const newHistory = prev.slice(0, historyIndex + 1);
+      newHistory.push(dataUrl);
+
+      if (newHistory.length > maxHistorySteps) {
+        newHistory.shift();
+      }
+
+      return newHistory;
+    });
+
+    setHistoryIndex((prev) => prev + 1);
+  }, [historyIndex]);
+
+  // ===== 元に戻す =====
+  const undoLastAction = useCallback(() => {
+    setCanvasHistory((prevHistory) => {
+      const newIndex = historyIndex - 1;
+      if (newIndex < 0) return prevHistory;
+
+      const previousState = prevHistory[newIndex];
+      if (!workingCanvasRef.current || !canvasRef.current) return prevHistory;
+
+      const workingCanvas = workingCanvasRef.current;
+      const workingCtx = workingCanvas.getContext("2d");
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+
+      if (!workingCtx || !ctx) return prevHistory;
+
+      const img = new Image();
+      img.onload = () => {
+        workingCtx.clearRect(0, 0, workingCanvas.width, workingCanvas.height);
+        workingCtx.drawImage(img, 0, 0);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(workingCanvas, 0, 0);
+
+        setHistoryIndex(newIndex);
+      };
+      img.src = previousState;
+
+      return prevHistory;
+    });
+  }, [historyIndex]);
+
+  // ===== やり直し =====
+  const redoLastAction = useCallback(() => {
+    setCanvasHistory((prevHistory) => {
+      const newIndex = historyIndex + 1;
+      if (newIndex >= prevHistory.length) return prevHistory;
+
+      const nextState = prevHistory[newIndex];
+      if (!workingCanvasRef.current || !canvasRef.current) return prevHistory;
+
+      const workingCanvas = workingCanvasRef.current;
+      const workingCtx = workingCanvas.getContext("2d");
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+
+      if (!workingCtx || !ctx) return prevHistory;
+
+      const img = new Image();
+      img.onload = () => {
+        workingCtx.clearRect(0, 0, workingCanvas.width, workingCanvas.height);
+        workingCtx.drawImage(img, 0, 0);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(workingCanvas, 0, 0);
+
+        setHistoryIndex(newIndex);
+      };
+      img.src = nextState;
+
+      return prevHistory;
+    });
+  }, [historyIndex]);
+
+  // キャンバス初期化と描画
+  useEffect(() => {
+    if (!imageSrc || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+
+    img.onload = () => {
+      // 画像の元サイズに合わせる
+      canvas.width = img.width;
+      canvas.height = img.height;
+
+      originalImageRef.current = img;
+
+      if (!workingCanvasRef.current) {
+        workingCanvasRef.current = document.createElement("canvas");
+      }
+      const workingCanvas = workingCanvasRef.current;
+      workingCanvas.width = canvas.width;
+      workingCanvas.height = canvas.height;
+      const workingCtx = workingCanvas.getContext("2d");
+      if (!workingCtx) return;
+
+      workingCtx.clearRect(0, 0, workingCanvas.width, workingCanvas.height);
+      workingCtx.drawImage(img, 0, 0);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(workingCanvas, 0, 0);
+
+      // 履歴リセット後に初期状態保存
+      setCanvasHistory([]);
+      setHistoryIndex(-1);
+      // 少し遅延させて保存しないと履歴が空になることがあるため即時実行
+      const dataUrl = workingCanvas.toDataURL();
+      setCanvasHistory([dataUrl]);
+      setHistoryIndex(0);
+    };
+
+    img.src = imageSrc;
+  }, [imageSrc]);
+
+  // ===== ファイルアップロード処理 =====
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.match("image.*")) {
+      alert("画像ファイルを選択してください");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result && typeof event.target.result === "string") {
+        setImageSrc(event.target.result);
+      }
+    };
+    reader.readAsDataURL(file);
+    // 同じファイルを選んでも発火するようにリセット
+    e.target.value = "";
+  };
+
+  // ===== 座標計算 (タッチ座標 → キャンバス座標変換) =====
+  const getCanvasCoords = (clientX: number, clientY: number) => {
+    if (!canvasRef.current) return { x: 0, y: 0 };
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+
+    // 実際のキャンバスサイズと表示サイズの比率
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+    return { x, y };
+  };
+
+  // 表示スケールの取得 (ブラシサイズの補正用)
+  const getCanvasDisplayScale = () => {
+    if (!canvasRef.current || !imageSrc) return 1;
+    const rect = canvasRef.current.getBoundingClientRect();
+    return rect.width / canvasRef.current.width;
+  };
+
+  // ===== ブラシぼかし適用 =====
+  const applyBlurAt = (x: number, y: number) => {
+    if (!workingCanvasRef.current || !canvasRef.current) return;
+
+    const workingCanvas = workingCanvasRef.current;
+    const workingCtx = workingCanvas.getContext("2d");
+    if (!workingCtx) return;
+
+    // ブラシサイズを表示サイズに合わせて補正
+    const displayScale = getCanvasDisplayScale();
+    const physicalBlurSize = blurSize / displayScale;
+    const radius = physicalBlurSize / 2;
+
+    const padding = blurRadius * 3;
+    const bufferSize = physicalBlurSize + padding * 2;
+
+    const blurCanvas = document.createElement("canvas");
+    blurCanvas.width = bufferSize;
+    blurCanvas.height = bufferSize;
+    const blurCtx = blurCanvas.getContext("2d");
+    if (!blurCtx) return;
+
+    blurCtx.filter = `blur(${blurRadius}px)`;
+
+    const srcX = x - radius - padding;
+    const srcY = y - radius - padding;
+
+    // ぼかし用バッファに描画
+    blurCtx.drawImage(
+      workingCanvas,
+      srcX,
+      srcY,
+      bufferSize,
+      bufferSize,
+      0,
+      0,
+      bufferSize,
+      bufferSize,
+    );
+
+    workingCtx.save();
+    workingCtx.beginPath();
+    workingCtx.arc(x, y, radius, 0, Math.PI * 2);
+    workingCtx.closePath();
+    workingCtx.clip();
+
+    workingCtx.globalCompositeOperation = "source-over";
+    workingCtx.drawImage(
+      blurCanvas,
+      padding,
+      padding,
+      physicalBlurSize,
+      physicalBlurSize,
+      x - radius,
+      y - radius,
+      physicalBlurSize,
+      physicalBlurSize,
+    );
+
+    workingCtx.restore();
+
+    // 画面用キャンバスに反映
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(workingCanvas, 0, 0);
+    }
+
+    // パフォーマンス調整: 連続描画時の履歴保存頻度を制御
+    const now = Date.now();
+    if (now - lastDrawTime > 400) {
+      saveCanvasState();
+      setLastDrawTime(now);
+    }
+  };
+
+  // ===== タッチ操作ハンドラ =====
+  const startDrawing = (clientX: number, clientY: number) => {
+    if (!imageSrc) return;
+    isDrawingRef.current = true;
+    const coords = getCanvasCoords(clientX, clientY);
+    applyBlurAt(coords.x, coords.y);
+  };
+
+  const moveDrawing = (clientX: number, clientY: number) => {
+    if (!imageSrc || !isDrawingRef.current) return;
+    const coords = getCanvasCoords(clientX, clientY);
+
+    // 間引き処理（高頻度すぎる実行を防ぐ）
+    const now = Date.now();
+    if (now - lastDrawTime > 30) {
+      applyBlurAt(coords.x, coords.y);
+      setLastDrawTime(now);
+    }
+  };
+
+  const stopDrawing = () => {
+    if (isDrawingRef.current) {
+      isDrawingRef.current = false;
+      saveCanvasState();
+    }
+  };
+
+  // タッチイベント (スマホ専用)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // 画面スクロール防止
+    if (e.cancelable) e.preventDefault();
+    if (e.touches.length > 0) {
+      startDrawing(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    // 画面スクロール防止
+    if (e.cancelable) e.preventDefault();
+    if (e.touches.length > 0) {
+      moveDrawing(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (e.cancelable) e.preventDefault();
+    stopDrawing();
+  };
+
+  // ===== ダウンロード =====
+  const downloadImage = () => {
+    if (!canvasRef.current) return;
+    const link = document.createElement("a");
+    link.download = "blurred-image.png";
+    link.href = canvasRef.current.toDataURL("image/png");
+    link.click();
+  };
+
+  // ===== スライダー =====
+  const handleBlurRadiusChange = (_: Event, newValue: number | number[]) => {
+    setBlurRadius(newValue as number);
+  };
+
+  const handleBlurSizeChangeWithPreview = (
+    _: Event,
+    newValue: number | number[],
+  ) => {
+    const value = newValue as number;
+    setBlurSize(value);
+
+    // プレビュー表示ロジック
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current);
+    }
+
+    const cssRadius = value / 2;
+    setPreviewCircle({ radius: cssRadius, visible: true });
+
+    previewTimeoutRef.current = setTimeout(() => {
+      setPreviewCircle(null);
+      previewTimeoutRef.current = null;
+    }, 2000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (previewTimeoutRef.current) {
+        clearTimeout(previewTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <Box
+      sx={{
+        minHeight: "100vh",
+        bgcolor: "grey.100",
+        color: "text.primary",
+        pb: 4,
+      }}
+    >
+      {/* ヘッダー */}
+      <AppBar
+        position="sticky"
+        elevation={0}
+        sx={{
+          bgcolor: "background.paper",
+          borderBottom: 1,
+          borderColor: "divider",
+          top: 0,
+        }}
+      >
+        <Toolbar
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            px: 2,
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Link href="/" className="no-underline flex items-center">
+              <NextImage
+                src="/top-image.png"
+                width={40}
+                height={32}
+                alt="logo"
+                style={{ objectFit: "contain" }}
+              />
+            </Link>
+          </Box>
+
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+            <IconButton
+              onClick={undoLastAction}
+              disabled={historyIndex <= 0}
+              color="primary"
+              size="large"
+            >
+              <UndoIcon />
+            </IconButton>
+            <IconButton
+              onClick={redoLastAction}
+              disabled={historyIndex >= canvasHistory.length - 1}
+              color="primary"
+              size="large"
+            >
+              <RedoIcon />
+            </IconButton>
+            <IconButton
+              onClick={downloadImage}
+              disabled={historyIndex < 0}
+              color="primary"
+              size="large"
+            >
+              <DownloadIcon />
+            </IconButton>
+          </Box>
+        </Toolbar>
+      </AppBar>
+
+      <Container maxWidth="sm" sx={{ mt: 2, px: 2 }}>
+        {/* 画像表示エリア */}
+        <Card
+          elevation={2}
+          sx={{
+            borderRadius: 3,
+            overflow: "hidden",
+            mb: 2,
+            bgcolor: "#fff",
+          }}
+        >
+          {imageSrc ? (
+            <Box
+              sx={{
+                position: "relative",
+                width: "100%",
+                // タッチアクションをnoneにすることでブラウザのスクロールを無効化
+                touchAction: "none",
+                bgcolor: "#eee",
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <canvas
+                ref={canvasRef}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                style={{
+                  maxWidth: "100%",
+                  height: "auto",
+                  display: "block",
+                  // タッチイベントの選択等を無効化
+                  WebkitUserSelect: "none",
+                  userSelect: "none",
+                  WebkitTouchCallout: "none",
+                }}
+              />
+            </Box>
+          ) : (
+            <Box
+              sx={{
+                height: 300,
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "center",
+                alignItems: "center",
+                bgcolor: "grey.50",
+                p: 3,
+                textAlign: "center",
+              }}
+            >
+              <PhotoCameraIcon
+                sx={{ fontSize: 60, color: "grey.300", mb: 2 }}
+              />
+              <Typography variant="body1" color="text.secondary" gutterBottom>
+                画像をアップロードして
+                <br />
+                指でなぞってぼかします
+              </Typography>
+              <Button
+                variant="contained"
+                startIcon={<UploadFileIcon />}
+                onClick={() => fileInputRef.current?.click()}
+                sx={{ mt: 2, borderRadius: 8, px: 4, py: 1.5 }}
+              >
+                画像を選択
+              </Button>
+            </Box>
+          )}
+        </Card>
+
+        {/* コントロールパネル */}
+        <Card elevation={1} sx={{ borderRadius: 3, p: 2 }}>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              ぼかしの強さ: {blurRadius}
+            </Typography>
+            <Slider
+              value={blurRadius}
+              onChange={handleBlurRadiusChange}
+              min={5}
+              max={50} // スマホ向けに上限を調整
+              size="medium"
+            />
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary">
+              ブラシサイズ: {blurSize}
+            </Typography>
+            <Slider
+              value={blurSize}
+              onChange={handleBlurSizeChangeWithPreview}
+              min={10}
+              max={150} // スマホ画面サイズに合わせて上限調整
+              color="secondary"
+              size="medium"
+            />
+          </Box>
+
+          {/* ブラシサイズプレビュー */}
+          {previewCircle && (
+            <Box
+              sx={{
+                position: "fixed",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                width: previewCircle.radius * 2,
+                height: previewCircle.radius * 2,
+                borderRadius: "50%",
+                border: "2px dashed #1976d2",
+                bgcolor: "rgba(25, 118, 210, 0.1)",
+                pointerEvents: "none",
+                zIndex: 9999,
+                opacity: previewCircle.visible ? 1 : 0,
+                transition: "opacity 0.2s",
+              }}
+            />
+          )}
+        </Card>
+
+        {/* 下部ボタン (画像変更) */}
+        <Box sx={{ mt: 3, mb: 4, textAlign: "center" }}>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImageUpload}
+            accept="image/*"
+            style={{ display: "none" }}
+          />
+          {imageSrc && (
+            <Button
+              variant="text"
+              color="inherit"
+              startIcon={<UploadFileIcon />}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              別の画像を選ぶ
+            </Button>
+          )}
+        </Box>
+      </Container>
+    </Box>
+  );
+};
+
+export default MobileBlurTool;

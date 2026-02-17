@@ -116,7 +116,7 @@ const AppHeaderClientOnly = () => {
             ))}
           </Box>
           <Box sx={{ display: { xs: "flex", sm: "none" } }}>
-            <IconButton aria-label="home" href="/">
+            <IconButton aria-label="home" href="/blur-mobile">
               <HomeIcon />
             </IconButton>
           </Box>

@@ -917,7 +917,7 @@ const BlurTool = () => {
         <Box sx={{ mt: 4, textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary">
             © {new Date().getFullYear()} 画像ぼかしツール |
-            個人情報保護のための簡単な解決策
+            個人情報保護のための簡単な解決
           </Typography>
         </Box>
       </Container>
