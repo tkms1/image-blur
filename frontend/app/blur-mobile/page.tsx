@@ -10,6 +10,15 @@ import {
   Toolbar,
   Container,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Radio,
+  RadioGroup,
+  FormControlLabel,
+  FormControl,
+  FormLabel,
 } from "@mui/material";
 import {
   Download as DownloadIcon,
@@ -51,12 +60,18 @@ const MobileBlurTool = () => {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const maxHistorySteps = 30;
 
+  // ダウンロード設定
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  const [imageFormat, setImageFormat] = useState<"jpeg" | "png">("jpeg");
+  const [imageQuality, setImageQuality] = useState(0.7);
+  const [maxDimension, setMaxDimension] = useState(2048); // 最大辺の長さ
+
   // ===== キャンバス状態を保存 =====
   const saveCanvasState = useCallback(() => {
     if (!workingCanvasRef.current) return;
 
     const workingCanvas = workingCanvasRef.current;
-    const dataUrl = workingCanvas.toDataURL();
+    const dataUrl = workingCanvas.toDataURL("image/jpeg", 0.9);
 
     setCanvasHistory((prev) => {
       const newHistory = prev.slice(0, historyIndex + 1);
@@ -148,8 +163,22 @@ const MobileBlurTool = () => {
     img.crossOrigin = "anonymous";
 
     img.onload = () => {
-      canvas.width = img.width;
-      canvas.height = img.height;
+      // 最大サイズに合わせてリサイズ
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = (height / width) * maxDimension;
+          width = maxDimension;
+        } else {
+          width = (width / height) * maxDimension;
+          height = maxDimension;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
 
       originalImageRef.current = img;
 
@@ -157,26 +186,26 @@ const MobileBlurTool = () => {
         workingCanvasRef.current = document.createElement("canvas");
       }
       const workingCanvas = workingCanvasRef.current;
-      workingCanvas.width = canvas.width;
-      workingCanvas.height = canvas.height;
+      workingCanvas.width = width;
+      workingCanvas.height = height;
       const workingCtx = workingCanvas.getContext("2d");
       if (!workingCtx) return;
 
       workingCtx.clearRect(0, 0, workingCanvas.width, workingCanvas.height);
-      workingCtx.drawImage(img, 0, 0);
+      workingCtx.drawImage(img, 0, 0, width, height);
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(workingCanvas, 0, 0);
 
       setCanvasHistory([]);
       setHistoryIndex(-1);
-      const dataUrl = workingCanvas.toDataURL();
+      const dataUrl = workingCanvas.toDataURL("image/jpeg", 0.9);
       setCanvasHistory([dataUrl]);
       setHistoryIndex(0);
     };
 
     img.src = imageSrc;
-  }, [imageSrc]);
+  }, [imageSrc, maxDimension]);
 
   // ===== ファイルアップロード処理 =====
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -389,14 +418,34 @@ const MobileBlurTool = () => {
     };
   }, [handleNativeTouchStart, handleNativeTouchMove, handleNativeTouchEnd]);
 
-  // ===== ダウンロード =====
+  // ===== ダウンロード（圧縮オプション付き）=====
   const downloadImage = useCallback(() => {
     if (!canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const mimeType = imageFormat === "jpeg" ? "image/jpeg" : "image/png";
+    const dataUrl = canvas.toDataURL(mimeType, imageQuality);
+
     const link = document.createElement("a");
-    link.download = "blurred-image.png";
-    link.href = canvasRef.current.toDataURL("image/png");
+    link.download = `blurred-image.${imageFormat}`;
+    link.href = dataUrl;
     link.click();
-  }, []);
+
+    // ファイルサイズの概算を表示（オプション）
+    const fileSize = Math.round((dataUrl.length * 3) / 4 / 1024); // KB
+    console.log(`ダウンロード完了: 約${fileSize}KB`);
+  }, [imageFormat, imageQuality]);
+
+  // ダウンロードダイアログを開く
+  const handleDownloadClick = () => {
+    setDownloadDialogOpen(true);
+  };
+
+  // ダウンロード設定を適用
+  const handleDownloadConfirm = () => {
+    setDownloadDialogOpen(false);
+    downloadImage();
+  };
 
   // ===== スライダー =====
   const handleBlurRadiusChange = useCallback(
@@ -493,7 +542,7 @@ const MobileBlurTool = () => {
               <RedoIcon />
             </IconButton>
             <IconButton
-              onClick={downloadImage}
+              onClick={handleDownloadClick}
               disabled={historyIndex < 0}
               color="primary"
               size="large"
@@ -647,6 +696,89 @@ const MobileBlurTool = () => {
           )}
         </Box>
       </Container>
+
+      {/* ダウンロード設定ダイアログ */}
+      <Dialog
+        open={downloadDialogOpen}
+        onClose={() => setDownloadDialogOpen(false)}
+      >
+        <DialogTitle>ダウンロード設定</DialogTitle>
+        <DialogContent>
+          <FormControl component="fieldset" sx={{ mt: 2, width: "100%" }}>
+            <FormLabel component="legend">画像形式</FormLabel>
+            <RadioGroup
+              value={imageFormat}
+              onChange={(e) => setImageFormat(e.target.value as "jpeg" | "png")}
+              row
+            >
+              <FormControlLabel
+                value="jpeg"
+                control={<Radio />}
+                label="JPEG（容量小）"
+              />
+              <FormControlLabel
+                value="png"
+                control={<Radio />}
+                label="PNG（容量大・高品質）"
+              />
+            </RadioGroup>
+
+            {imageFormat === "jpeg" && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="caption" color="text.secondary">
+                  画質: {Math.round(imageQuality * 100)}%
+                </Typography>
+                <Slider
+                  value={imageQuality}
+                  onChange={(_, value) => setImageQuality(value as number)}
+                  min={0.3}
+                  max={1}
+                  step={0.1}
+                  marks={[
+                    { value: 0.3, label: "30%" },
+                    { value: 0.5, label: "50%" },
+                    { value: 0.7, label: "70%" },
+                    { value: 0.9, label: "90%" },
+                    { value: 1, label: "100%" },
+                  ]}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  推奨: 70%（きれいで容量も抑えられます）
+                </Typography>
+              </Box>
+            )}
+
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="caption" color="text.secondary">
+                最大サイズ: {maxDimension}px
+              </Typography>
+              <Slider
+                value={maxDimension}
+                onChange={(_, value) => setMaxDimension(value as number)}
+                min={1024}
+                max={4096}
+                step={512}
+                marks={[
+                  { value: 1024, label: "1K" },
+                  { value: 2048, label: "2K" },
+                  { value: 4096, label: "4K" },
+                ]}
+              />
+              <Typography variant="caption" color="text.secondary">
+                推奨: 2048px（スマホには十分）
+              </Typography>
+            </Box>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDownloadDialogOpen(false)}>
+            キャンセル
+          </Button>
+          <Button onClick={handleDownloadConfirm} variant="contained">
+            ダウンロード
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
