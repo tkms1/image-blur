@@ -4,10 +4,8 @@ import {
   Box,
   Typography,
   Card,
-  CardContent,
   Slider,
   IconButton,
-  useTheme,
   AppBar,
   Toolbar,
   Container,
@@ -25,8 +23,6 @@ import NextImage from "next/image";
 import Link from "next/link";
 
 const MobileBlurTool = () => {
-  const theme = useTheme();
-
   const [imageSrc, setImageSrc] = useState<string | null>(null);
 
   // 描画状態の管理
@@ -40,7 +36,7 @@ const MobileBlurTool = () => {
 
   // 設定値
   const [blurRadius, setBlurRadius] = useState(20);
-  const [blurSize, setBlurSize] = useState(40); // スマホ向けに初期サイズを少し小さく
+  const [blurSize, setBlurSize] = useState(40);
   const [lastDrawTime, setLastDrawTime] = useState(0);
 
   // プレビュー用サークル
@@ -53,7 +49,7 @@ const MobileBlurTool = () => {
   // 履歴管理 (Undo/Redo)
   const [canvasHistory, setCanvasHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const maxHistorySteps = 30; // スマホのメモリを考慮して少し減らす
+  const maxHistorySteps = 30;
 
   // ===== キャンバス状態を保存 =====
   const saveCanvasState = useCallback(() => {
@@ -152,7 +148,6 @@ const MobileBlurTool = () => {
     img.crossOrigin = "anonymous";
 
     img.onload = () => {
-      // 画像の元サイズに合わせる
       canvas.width = img.width;
       canvas.height = img.height;
 
@@ -173,10 +168,8 @@ const MobileBlurTool = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(workingCanvas, 0, 0);
 
-      // 履歴リセット後に初期状態保存
       setCanvasHistory([]);
       setHistoryIndex(-1);
-      // 少し遅延させて保存しないと履歴が空になることがあるため即時実行
       const dataUrl = workingCanvas.toDataURL();
       setCanvasHistory([dataUrl]);
       setHistoryIndex(0);
@@ -202,193 +195,238 @@ const MobileBlurTool = () => {
       }
     };
     reader.readAsDataURL(file);
-    // 同じファイルを選んでも発火するようにリセット
     e.target.value = "";
   };
 
-  // ===== 座標計算 (タッチ座標 → キャンバス座標変換) =====
-  const getCanvasCoords = (clientX: number, clientY: number) => {
+  // ===== 座標計算 =====
+  const getCanvasCoords = useCallback((clientX: number, clientY: number) => {
     if (!canvasRef.current) return { x: 0, y: 0 };
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
 
-    // 実際のキャンバスサイズと表示サイズの比率
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
     const x = (clientX - rect.left) * scaleX;
     const y = (clientY - rect.top) * scaleY;
     return { x, y };
-  };
+  }, []);
 
-  // 表示スケールの取得 (ブラシサイズの補正用)
-  const getCanvasDisplayScale = () => {
+  const getCanvasDisplayScale = useCallback(() => {
     if (!canvasRef.current || !imageSrc) return 1;
     const rect = canvasRef.current.getBoundingClientRect();
     return rect.width / canvasRef.current.width;
-  };
+  }, [imageSrc]);
 
   // ===== ブラシぼかし適用 =====
-  const applyBlurAt = (x: number, y: number) => {
-    if (!workingCanvasRef.current || !canvasRef.current) return;
+  const applyBlurAt = useCallback(
+    (x: number, y: number) => {
+      if (!workingCanvasRef.current || !canvasRef.current) return;
 
-    const workingCanvas = workingCanvasRef.current;
-    const workingCtx = workingCanvas.getContext("2d");
-    if (!workingCtx) return;
+      const workingCanvas = workingCanvasRef.current;
+      const workingCtx = workingCanvas.getContext("2d");
+      if (!workingCtx) return;
 
-    // ブラシサイズを表示サイズに合わせて補正
-    const displayScale = getCanvasDisplayScale();
-    const physicalBlurSize = blurSize / displayScale;
-    const radius = physicalBlurSize / 2;
+      const displayScale = getCanvasDisplayScale();
+      const physicalBlurSize = blurSize / displayScale;
+      const radius = physicalBlurSize / 2;
 
-    const padding = blurRadius * 3;
-    const bufferSize = physicalBlurSize + padding * 2;
+      const padding = blurRadius * 3;
+      const bufferSize = physicalBlurSize + padding * 2;
 
-    const blurCanvas = document.createElement("canvas");
-    blurCanvas.width = bufferSize;
-    blurCanvas.height = bufferSize;
-    const blurCtx = blurCanvas.getContext("2d");
-    if (!blurCtx) return;
+      const blurCanvas = document.createElement("canvas");
+      blurCanvas.width = bufferSize;
+      blurCanvas.height = bufferSize;
+      const blurCtx = blurCanvas.getContext("2d");
+      if (!blurCtx) return;
 
-    blurCtx.filter = `blur(${blurRadius}px)`;
+      blurCtx.filter = `blur(${blurRadius}px)`;
 
-    const srcX = x - radius - padding;
-    const srcY = y - radius - padding;
+      const srcX = x - radius - padding;
+      const srcY = y - radius - padding;
 
-    // ぼかし用バッファに描画
-    blurCtx.drawImage(
-      workingCanvas,
-      srcX,
-      srcY,
-      bufferSize,
-      bufferSize,
-      0,
-      0,
-      bufferSize,
-      bufferSize,
-    );
+      blurCtx.drawImage(
+        workingCanvas,
+        srcX,
+        srcY,
+        bufferSize,
+        bufferSize,
+        0,
+        0,
+        bufferSize,
+        bufferSize,
+      );
 
-    workingCtx.save();
-    workingCtx.beginPath();
-    workingCtx.arc(x, y, radius, 0, Math.PI * 2);
-    workingCtx.closePath();
-    workingCtx.clip();
+      workingCtx.save();
+      workingCtx.beginPath();
+      workingCtx.arc(x, y, radius, 0, Math.PI * 2);
+      workingCtx.closePath();
+      workingCtx.clip();
 
-    workingCtx.globalCompositeOperation = "source-over";
-    workingCtx.drawImage(
-      blurCanvas,
-      padding,
-      padding,
-      physicalBlurSize,
-      physicalBlurSize,
-      x - radius,
-      y - radius,
-      physicalBlurSize,
-      physicalBlurSize,
-    );
+      workingCtx.globalCompositeOperation = "source-over";
+      workingCtx.drawImage(
+        blurCanvas,
+        padding,
+        padding,
+        physicalBlurSize,
+        physicalBlurSize,
+        x - radius,
+        y - radius,
+        physicalBlurSize,
+        physicalBlurSize,
+      );
 
-    workingCtx.restore();
+      workingCtx.restore();
 
-    // 画面用キャンバスに反映
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(workingCanvas, 0, 0);
-    }
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(workingCanvas, 0, 0);
+      }
 
-    // パフォーマンス調整: 連続描画時の履歴保存頻度を制御
-    const now = Date.now();
-    if (now - lastDrawTime > 400) {
-      saveCanvasState();
-      setLastDrawTime(now);
-    }
-  };
+      const now = Date.now();
+      if (now - lastDrawTime > 400) {
+        saveCanvasState();
+        setLastDrawTime(now);
+      }
+    },
+    [
+      blurRadius,
+      blurSize,
+      getCanvasDisplayScale,
+      lastDrawTime,
+      saveCanvasState,
+    ],
+  );
 
-  // ===== タッチ操作ハンドラ =====
-  const startDrawing = (clientX: number, clientY: number) => {
-    if (!imageSrc) return;
-    isDrawingRef.current = true;
-    const coords = getCanvasCoords(clientX, clientY);
-    applyBlurAt(coords.x, coords.y);
-  };
-
-  const moveDrawing = (clientX: number, clientY: number) => {
-    if (!imageSrc || !isDrawingRef.current) return;
-    const coords = getCanvasCoords(clientX, clientY);
-
-    // 間引き処理（高頻度すぎる実行を防ぐ）
-    const now = Date.now();
-    if (now - lastDrawTime > 30) {
+  // ===== ドローイング処理（useCallback でメモ化）=====
+  const startDrawing = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!imageSrc) return;
+      isDrawingRef.current = true;
+      const coords = getCanvasCoords(clientX, clientY);
       applyBlurAt(coords.x, coords.y);
-      setLastDrawTime(now);
-    }
-  };
+    },
+    [imageSrc, getCanvasCoords, applyBlurAt],
+  );
 
-  const stopDrawing = () => {
+  const moveDrawing = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!imageSrc || !isDrawingRef.current) return;
+      const coords = getCanvasCoords(clientX, clientY);
+
+      const now = Date.now();
+      if (now - lastDrawTime > 30) {
+        applyBlurAt(coords.x, coords.y);
+        setLastDrawTime(now);
+      }
+    },
+    [imageSrc, getCanvasCoords, applyBlurAt, lastDrawTime],
+  );
+
+  const stopDrawing = useCallback(() => {
     if (isDrawingRef.current) {
       isDrawingRef.current = false;
       saveCanvasState();
     }
-  };
+  }, [saveCanvasState]);
 
-  // タッチイベント (スマホ専用)
-  const handleTouchStart = (e: React.TouchEvent) => {
-    // 画面スクロール防止
-    if (e.cancelable) e.preventDefault();
-    if (e.touches.length > 0) {
-      startDrawing(e.touches[0].clientX, e.touches[0].clientY);
-    }
-  };
+  // ★★★★★ ネイティブタッチイベントハンドラ ★★★★★
+  const handleNativeTouchStart = useCallback(
+    (e: TouchEvent) => {
+      if (!imageSrc) return;
+      e.preventDefault();
+      if (e.touches.length > 0) {
+        startDrawing(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    },
+    [imageSrc, startDrawing],
+  );
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    // 画面スクロール防止
-    if (e.cancelable) e.preventDefault();
-    if (e.touches.length > 0) {
-      moveDrawing(e.touches[0].clientX, e.touches[0].clientY);
-    }
-  };
+  const handleNativeTouchMove = useCallback(
+    (e: TouchEvent) => {
+      if (!imageSrc || !isDrawingRef.current) return;
+      e.preventDefault();
+      if (e.touches.length > 0) {
+        moveDrawing(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    },
+    [imageSrc, moveDrawing],
+  );
 
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (e.cancelable) e.preventDefault();
-    stopDrawing();
-  };
+  const handleNativeTouchEnd = useCallback(
+    (e: TouchEvent) => {
+      e.preventDefault();
+      stopDrawing();
+    },
+    [stopDrawing],
+  );
+
+  // ★★★★★ useEffect でネイティブイベントを登録 ★★★★★
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    canvas.addEventListener("touchstart", handleNativeTouchStart, {
+      passive: false,
+    });
+    canvas.addEventListener("touchmove", handleNativeTouchMove, {
+      passive: false,
+    });
+    canvas.addEventListener("touchend", handleNativeTouchEnd, {
+      passive: false,
+    });
+    canvas.addEventListener("touchcancel", handleNativeTouchEnd, {
+      passive: false,
+    });
+
+    return () => {
+      canvas.removeEventListener("touchstart", handleNativeTouchStart);
+      canvas.removeEventListener("touchmove", handleNativeTouchMove);
+      canvas.removeEventListener("touchend", handleNativeTouchEnd);
+      canvas.removeEventListener("touchcancel", handleNativeTouchEnd);
+    };
+  }, [handleNativeTouchStart, handleNativeTouchMove, handleNativeTouchEnd]);
 
   // ===== ダウンロード =====
-  const downloadImage = () => {
+  const downloadImage = useCallback(() => {
     if (!canvasRef.current) return;
     const link = document.createElement("a");
     link.download = "blurred-image.png";
     link.href = canvasRef.current.toDataURL("image/png");
     link.click();
-  };
+  }, []);
 
   // ===== スライダー =====
-  const handleBlurRadiusChange = (_: Event, newValue: number | number[]) => {
-    setBlurRadius(newValue as number);
-  };
+  const handleBlurRadiusChange = useCallback(
+    (_: Event, newValue: number | number[]) => {
+      setBlurRadius(newValue as number);
+    },
+    [],
+  );
 
-  const handleBlurSizeChangeWithPreview = (
-    _: Event,
-    newValue: number | number[],
-  ) => {
-    const value = newValue as number;
-    setBlurSize(value);
+  const handleBlurSizeChangeWithPreview = useCallback(
+    (_: Event, newValue: number | number[]) => {
+      const value = newValue as number;
+      setBlurSize(value);
 
-    // プレビュー表示ロジック
-    if (previewTimeoutRef.current) {
-      clearTimeout(previewTimeoutRef.current);
-    }
+      if (previewTimeoutRef.current) {
+        clearTimeout(previewTimeoutRef.current);
+      }
 
-    const cssRadius = value / 2;
-    setPreviewCircle({ radius: cssRadius, visible: true });
+      const cssRadius = value / 2;
+      setPreviewCircle({ radius: cssRadius, visible: true });
 
-    previewTimeoutRef.current = setTimeout(() => {
-      setPreviewCircle(null);
-      previewTimeoutRef.current = null;
-    }, 2000);
-  };
+      previewTimeoutRef.current = setTimeout(() => {
+        setPreviewCircle(null);
+        previewTimeoutRef.current = null;
+      }, 2000);
+    },
+    [],
+  );
 
+  // プレビュー用タイマーのクリーンアップ
   useEffect(() => {
     return () => {
       if (previewTimeoutRef.current) {
@@ -482,8 +520,10 @@ const MobileBlurTool = () => {
               sx={{
                 position: "relative",
                 width: "100%",
-                // タッチアクションをnoneにすることでブラウザのスクロールを無効化
                 touchAction: "none",
+                WebkitTouchCallout: "none",
+                WebkitUserSelect: "none",
+                userSelect: "none",
                 bgcolor: "#eee",
                 display: "flex",
                 justifyContent: "center",
@@ -492,17 +532,14 @@ const MobileBlurTool = () => {
             >
               <canvas
                 ref={canvasRef}
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
                 style={{
                   maxWidth: "100%",
                   height: "auto",
                   display: "block",
-                  // タッチイベントの選択等を無効化
                   WebkitUserSelect: "none",
                   userSelect: "none",
                   WebkitTouchCallout: "none",
+                  touchAction: "none",
                 }}
               />
             </Box>
@@ -549,7 +586,7 @@ const MobileBlurTool = () => {
               value={blurRadius}
               onChange={handleBlurRadiusChange}
               min={5}
-              max={50} // スマホ向けに上限を調整
+              max={50}
               size="medium"
             />
           </Box>
@@ -561,7 +598,7 @@ const MobileBlurTool = () => {
               value={blurSize}
               onChange={handleBlurSizeChangeWithPreview}
               min={10}
-              max={150} // スマホ画面サイズに合わせて上限調整
+              max={150}
               color="secondary"
               size="medium"
             />
