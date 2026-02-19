@@ -12,7 +12,6 @@ import {
   CircularProgress,
   Fab,
   Slider,
-  Grid,
   Paper,
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
@@ -26,6 +25,35 @@ const StyledCanvas = styled("canvas")({
   height: "auto",
 });
 
+// プレビュー用の円の Props 型定義
+interface BrushPreviewProps {
+  size: number;
+  x: number;
+  y: number;
+  opacity: number;
+}
+
+// プレビュー用の円スタイル（型定義を追加）
+const BrushPreview = styled("div")<BrushPreviewProps>(
+  ({ size, x, y, opacity }) => ({
+    position: "absolute",
+    width: size,
+    height: size,
+    borderRadius: "50%",
+    border: "2px solid rgba(255, 255, 255, 0.8)",
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    boxShadow: "0 0 4px rgba(0, 0, 0, 0.5)",
+    pointerEvents: "none", // クリックを透過させる
+    transform: "translate(-50%, -50%)", // 中心基準で配置
+    left: x,
+    top: y,
+    opacity: opacity,
+    transition: "opacity 0.3s ease",
+    zIndex: 10,
+    display: opacity > 0 ? "block" : "none",
+  }),
+);
+
 export default function Home() {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -35,6 +63,9 @@ export default function Home() {
   const [brushSize, setBrushSize] = useState(50); // ブラシサイズ (表示上の px)
   const [blurStrength, setBlurStrength] = useState(1.0); // ぼかしの強さ (0.1 ~ 1.0)
 
+  // プレビュー表示の状態
+  const [previewPos, setPreviewPos] = useState({ x: 0, y: 0, visible: false });
+
   // 2 つの Canvas を管理するための Ref
   const topCanvasRef = useRef<HTMLCanvasElement>(null); // 通常画像用（削る用・マスク）
   const bottomCanvasRef = useRef<HTMLCanvasElement>(null); // ぼかし画像用（背景）
@@ -42,6 +73,9 @@ export default function Home() {
 
   // タップ判定用の座標保持
   const startPos = useRef<{ x: number; y: number } | null>(null);
+
+  // プレビュー非表示タイマー用 Ref
+  const previewTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // 画像のアップロード処理
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -103,6 +137,28 @@ export default function Home() {
     };
   }, [imageSrc]);
 
+  // プレビュー表示制御ヘルパー
+  const showPreview = (clientX: number, clientY: number) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+
+    // コンテナ内の相対座標を計算
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    setPreviewPos({ x, y, visible: true });
+
+    // 既存のタイマーをクリア
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+    }
+
+    // 2 秒後にプレビューを非表示
+    previewTimerRef.current = setTimeout(() => {
+      setPreviewPos((prev) => ({ ...prev, visible: false }));
+    }, 2000);
+  };
+
   // 座標変換ヘルパー
   const getCoordinates = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = topCanvasRef.current;
@@ -124,6 +180,10 @@ export default function Home() {
     const { x, y } = getCoordinates(e);
     startPos.current = { x, y }; // タップ判定用に開始位置を保存
     draw(e);
+
+    // 描画中はプレビューを即時非表示（カーソルと被らないように）
+    setPreviewPos((prev) => ({ ...prev, visible: false }));
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
   };
 
   // 描画終了
@@ -224,6 +284,14 @@ export default function Home() {
   // スライダーのラベル表示用
   const valLabel = (value: number) => {
     return value.toFixed(1);
+  };
+
+  // コンテナ上のポインター移動イベント（プレビュー表示用）
+  const handleContainerPointerMove = (
+    e: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (isDrawing) return; // 描画中はプレビューを出さない
+    showPreview(e.clientX, e.clientY);
   };
 
   return (
@@ -333,8 +401,21 @@ export default function Home() {
                   overflow: "hidden",
                   boxShadow: 1,
                   backgroundColor: "#f0f0f0",
+                  cursor: isDrawing ? "none" : "default", // 描画中はカーソルを隠す
                 }}
+                onPointerMove={handleContainerPointerMove}
+                onPointerLeave={() =>
+                  setPreviewPos((prev) => ({ ...prev, visible: false }))
+                }
               >
+                {/* プレビュー表示要素 */}
+                <BrushPreview
+                  size={brushSize}
+                  x={previewPos.x}
+                  y={previewPos.y}
+                  opacity={previewPos.visible ? 1 : 0}
+                />
+
                 {/* 下の Canvas (ぼかし画像) */}
                 <StyledCanvas
                   ref={bottomCanvasRef}
