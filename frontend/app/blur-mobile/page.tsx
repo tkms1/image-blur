@@ -16,7 +16,151 @@ import {
 import { styled } from "@mui/material/styles";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 
-// キャンバスを包むコンテナ
+// -----------------------------------------------------------------------------
+// ▼ ぼかし処理アルゴリズム (Box Blur近似によるガウスぼかし)
+// スマホでも確実に滑らかなぼかしを作るための計算ロジック
+// -----------------------------------------------------------------------------
+const applyBlurProcessing = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  radius: number,
+) => {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const pixels = imageData.data;
+
+  // 3回適用することでガウスぼかしに近づける（滑らかになる）
+  // 処理負荷軽減のため、半径を調整して3回回す
+  const iterations = 3;
+  const r = Math.floor(radius / 2); // CSSのblur(15px)に近い見た目にする調整
+
+  for (let i = 0; i < iterations; i++) {
+    boxBlurH(pixels, width, height, r);
+    boxBlurT(pixels, width, height, r);
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+};
+
+// 水平方向のぼかし
+const boxBlurH = (
+  pixels: Uint8ClampedArray,
+  w: number,
+  h: number,
+  r: number,
+) => {
+  const iarr = 1 / (r + r + 1);
+  for (let i = 0; i < h; i++) {
+    let ti = i * w,
+      li = ti,
+      ri = ti + r;
+    const fv = pixels[ti * 4],
+      fv1 = pixels[ti * 4 + 1],
+      fv2 = pixels[ti * 4 + 2];
+    const lv = pixels[(ti + w - 1) * 4],
+      lv1 = pixels[(ti + w - 1) * 4 + 1],
+      lv2 = pixels[(ti + w - 1) * 4 + 2];
+    let val_r = (r + 1) * fv,
+      val_g = (r + 1) * fv1,
+      val_b = (r + 1) * fv2;
+
+    for (let j = 0; j < r; j++) {
+      val_r += pixels[(ti + j) * 4];
+      val_g += pixels[(ti + j) * 4 + 1];
+      val_b += pixels[(ti + j) * 4 + 2];
+    }
+    for (let j = 0; j <= r; j++) {
+      val_r += pixels[ri++ * 4] - fv;
+      val_g += pixels[(ri - 1) * 4 + 1] - fv1;
+      val_b += pixels[(ri - 1) * 4 + 2] - fv2;
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      ti++;
+    }
+    for (let j = r + 1; j < w - r; j++) {
+      val_r += pixels[ri++ * 4] - pixels[li++ * 4];
+      val_g += pixels[(ri - 1) * 4 + 1] - pixels[(li - 1) * 4 + 1];
+      val_b += pixels[(ri - 1) * 4 + 2] - pixels[(li - 1) * 4 + 2];
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      ti++;
+    }
+    for (let j = w - r; j < w; j++) {
+      val_r += lv - pixels[li++ * 4];
+      val_g += lv1 - pixels[(li - 1) * 4 + 1];
+      val_b += lv2 - pixels[(li - 1) * 4 + 2];
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      ti++;
+    }
+  }
+};
+
+// 垂直方向のぼかし
+const boxBlurT = (
+  pixels: Uint8ClampedArray,
+  w: number,
+  h: number,
+  r: number,
+) => {
+  const iarr = 1 / (r + r + 1);
+  for (let i = 0; i < w; i++) {
+    let ti = i,
+      li = ti,
+      ri = ti + r * w;
+    const fv = pixels[ti * 4],
+      fv1 = pixels[ti * 4 + 1],
+      fv2 = pixels[ti * 4 + 2];
+    const lv = pixels[(ti + w * (h - 1)) * 4],
+      lv1 = pixels[(ti + w * (h - 1)) * 4 + 1],
+      lv2 = pixels[(ti + w * (h - 1)) * 4 + 2];
+    let val_r = (r + 1) * fv,
+      val_g = (r + 1) * fv1,
+      val_b = (r + 1) * fv2;
+    for (let j = 0; j < r; j++) {
+      val_r += pixels[(ti + j * w) * 4];
+      val_g += pixels[(ti + j * w) * 4 + 1];
+      val_b += pixels[(ti + j * w) * 4 + 2];
+    }
+    for (let j = 0; j <= r; j++) {
+      val_r += pixels[ri * 4] - fv;
+      val_g += pixels[ri * 4 + 1] - fv1;
+      val_b += pixels[ri * 4 + 2] - fv2;
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      ri += w;
+      ti += w;
+    }
+    for (let j = r + 1; j < h - r; j++) {
+      val_r += pixels[ri * 4] - pixels[li * 4];
+      val_g += pixels[ri * 4 + 1] - pixels[li * 4 + 1];
+      val_b += pixels[ri * 4 + 2] - pixels[li * 4 + 2];
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      li += w;
+      ri += w;
+      ti += w;
+    }
+    for (let j = h - r; j < h; j++) {
+      val_r += lv - pixels[li * 4];
+      val_g += lv1 - pixels[li * 4 + 1];
+      val_b += lv2 - pixels[li * 4 + 2];
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      li += w;
+      ti += w;
+    }
+  }
+};
+// -----------------------------------------------------------------------------
+
+// スタイル定義
 const CanvasContainer = styled("div")({
   position: "relative",
   width: "100%",
@@ -28,7 +172,6 @@ const CanvasContainer = styled("div")({
   WebkitTapHighlightColor: "transparent",
 });
 
-// Canvasの共通スタイル
 const StyledCanvas = styled("canvas")({
   display: "block",
   position: "absolute",
@@ -38,7 +181,6 @@ const StyledCanvas = styled("canvas")({
   height: "100%",
 });
 
-// プレビュー用の円
 interface BrushPreviewProps {
   size: number;
   x: number;
@@ -70,15 +212,13 @@ export default function Home() {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false); // 保存中のローディング用
 
-  // スマホのメモリ不足防止用サイズ制限
   const MAX_CANVAS_SIZE = 1200;
 
   const [brushSize, setBrushSize] = useState(50);
   const [blurStrength, setBlurStrength] = useState(1.0);
   const [previewPos, setPreviewPos] = useState({ x: 0, y: 0, visible: false });
-
-  // コンテナの高さを確保するためのステート
   const [containerHeight, setContainerHeight] = useState<number | "auto">(
     "auto",
   );
@@ -104,7 +244,6 @@ export default function Home() {
     reader.readAsDataURL(file);
   };
 
-  // 画像読み込みとCanvas初期化
   useEffect(() => {
     if (
       !imageSrc ||
@@ -117,7 +256,6 @@ export default function Home() {
     const img = new Image();
     img.src = imageSrc;
     img.onload = () => {
-      // 1. リサイズ計算
       let width = img.width;
       let height = img.height;
 
@@ -135,58 +273,45 @@ export default function Home() {
 
       imageRef.current = img;
 
-      // 2. Canvasの内部解像度を設定
       const topCanvas = topCanvasRef.current!;
       const bottomCanvas = bottomCanvasRef.current!;
-
       topCanvas.width = width;
       topCanvas.height = height;
       bottomCanvas.width = width;
       bottomCanvas.height = height;
 
-      // 3. コンテナの表示サイズ計算（高さを確定させる）
       const containerWidth = containerRef.current!.clientWidth;
       const scale = containerWidth / width;
       const displayHeight = height * scale;
       setContainerHeight(displayHeight);
 
-      // 4. 描画
       const topCtx = topCanvas.getContext("2d");
       const bottomCtx = bottomCanvas.getContext("2d");
 
       if (topCtx && bottomCtx) {
-        // 下層：背景用画像を描画
+        // 背景用
         bottomCtx.drawImage(img, 0, 0, width, height);
-
-        // ★アプリ上の見た目はCSSでぼかす（スムーズなぼかし）
+        // ★アプリ上の見た目はCSSでぼかす（プレビュー用）
         bottomCanvas.style.filter = "blur(15px)";
 
-        // 上層：操作用画像を描画
+        // 操作用
         topCtx.globalCompositeOperation = "source-over";
         topCtx.drawImage(img, 0, 0, width, height);
       }
     };
   }, [imageSrc]);
 
-  // 座標取得
   const getCoordinates = (e: React.PointerEvent) => {
     const canvas = topCanvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
-
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-
-    return {
-      x: x * scaleX,
-      y: y * scaleY,
-    };
+    return { x: x * scaleX, y: y * scaleY };
   };
 
-  // 描画開始
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     setIsDrawing(true);
@@ -194,18 +319,15 @@ export default function Home() {
     setPreviewPos((prev) => ({ ...prev, visible: false }));
   };
 
-  // 描画処理
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     if (!isDrawing || !topCanvasRef.current) return;
     const ctx = topCanvasRef.current.getContext("2d");
     if (!ctx) return;
-
     const { x, y } = getCoordinates(e);
 
     ctx.globalCompositeOperation = "destination-out";
     ctx.globalAlpha = blurStrength;
-
     const canvas = topCanvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const scale = canvas.width / rect.width;
@@ -213,10 +335,8 @@ export default function Home() {
     ctx.lineWidth = brushSize * scale;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-
     ctx.lineTo(x, y);
     ctx.stroke();
-
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.globalAlpha = 1.0;
@@ -235,61 +355,58 @@ export default function Home() {
     const rect = containerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-
     setPreviewPos({ x, y, visible: true });
-
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
     previewTimerRef.current = setTimeout(() => {
       setPreviewPos((prev) => ({ ...prev, visible: false }));
     }, 1500);
   };
 
-  // ★修正箇所：ダウンロード処理
-  // モザイク化（縮小拡大）を完全に廃止し、正規のぼかし処理のみを行う
+  // ★修正箇所：ダウンロード処理（JavaScriptによる直接ぼかし計算）
   const handleDownload = () => {
-    if (!topCanvasRef.current || !bottomCanvasRef.current) return;
+    if (!topCanvasRef.current || !bottomCanvasRef.current || !imageRef.current)
+      return;
 
-    const topCanvas = topCanvasRef.current;
-    const bottomCanvas = bottomCanvasRef.current;
-    const width = topCanvas.width;
-    const height = topCanvas.height;
+    // UIをブロックしないようにローディングを表示
+    setIsSaving(true);
 
-    const outputCanvas = document.createElement("canvas");
-    outputCanvas.width = width;
-    outputCanvas.height = height;
-    const ctx = outputCanvas.getContext("2d");
-    if (!ctx) return;
+    // 少し待ってから処理開始（レンダリング更新のため）
+    setTimeout(() => {
+      const topCanvas = topCanvasRef.current!;
+      const width = topCanvas.width;
+      const height = topCanvas.height;
 
-    // 1. 背景のぼかし画像を生成
-    // モザイク処理を削除し、ブラウザ標準の高画質ぼかし(blur filter)を使用
-    // ※bottomCanvasには元画像が描画されています
+      // 1. 出力用Canvas作成
+      const outputCanvas = document.createElement("canvas");
+      outputCanvas.width = width;
+      outputCanvas.height = height;
+      const ctx = outputCanvas.getContext("2d");
 
-    const hasFilterSupport = typeof ctx.filter !== "undefined";
+      if (!ctx) {
+        setIsSaving(false);
+        return;
+      }
 
-    if (hasFilterSupport) {
-      // プレビューと同じ 'blur(15px)' を適用
-      ctx.filter = "blur(15px)";
-      ctx.drawImage(bottomCanvas, 0, 0);
-      ctx.filter = "none";
-    } else {
-      // 万が一 filter 未対応の場合のフォールバック
-      // モザイクにならないよう、単純に元画像を描画（ぼかしなし）するか
-      // 重ね合わせで擬似的なぼかしを作る
-      // ここでは最低限モザイク化を防ぐため、そのまま描画（鮮明だがモザイクよりマシ）
-      ctx.drawImage(bottomCanvas, 0, 0);
-    }
+      // 2. 背景画像をCanvasに描き、JSで計算してぼかす
+      // これにより「縮小拡大」によるモザイク化を完全に回避
+      ctx.drawImage(imageRef.current!, 0, 0, width, height);
 
-    // 2. その上に「穴の空いた画像（topCanvas）」を重ねる
-    // 穴の部分から、下の「ぼかした背景」が見えるようになる
-    ctx.globalCompositeOperation = "source-over";
-    ctx.drawImage(topCanvas, 0, 0);
+      // ここでぼかし処理を実行（少し重いが、確実に滑らかになる）
+      applyBlurProcessing(ctx, width, height, 20); // 半径20px程度でぼかす
 
-    // 3. 高画質で保存
-    const dataUrl = outputCanvas.toDataURL("image/jpeg", 0.95);
-    const link = document.createElement("a");
-    link.download = "blur-edited.jpg";
-    link.href = dataUrl;
-    link.click();
+      // 3. 穴あき画像（操作結果）を重ねる
+      ctx.globalCompositeOperation = "source-over";
+      ctx.drawImage(topCanvas, 0, 0);
+
+      // 4. 保存
+      const dataUrl = outputCanvas.toDataURL("image/jpeg", 0.95);
+      const link = document.createElement("a");
+      link.download = "blur-edited.jpg";
+      link.href = dataUrl;
+      link.click();
+
+      setIsSaving(false);
+    }, 100);
   };
 
   const handleReset = () => {
@@ -400,8 +517,9 @@ export default function Home() {
                   color="primary"
                   startIcon={<FileDownloadIcon />}
                   onClick={handleDownload}
+                  disabled={isSaving}
                 >
-                  保存
+                  {isSaving ? "処理中..." : "保存"}
                 </Button>
                 <Button color="secondary" onClick={() => setImageSrc(null)}>
                   閉じる
@@ -412,7 +530,7 @@ export default function Home() {
         </CardContent>
       </Card>
 
-      {isLoading && (
+      {(isLoading || isSaving) && (
         <Box
           sx={{
             position: "fixed",
@@ -427,7 +545,12 @@ export default function Home() {
             zIndex: 9999,
           }}
         >
-          <CircularProgress />
+          <Stack alignItems="center" spacing={2}>
+            <CircularProgress />
+            {isSaving && (
+              <Typography variant="body2">高画質処理中...</Typography>
+            )}
+          </Stack>
         </Box>
       )}
     </Container>
