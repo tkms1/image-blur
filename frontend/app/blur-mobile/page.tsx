@@ -29,10 +29,8 @@ const applyBlurProcessing = (
   const imageData = ctx.getImageData(0, 0, width, height);
   const pixels = imageData.data;
 
-  // 3回適用することでガウスぼかしに近づける（滑らかになる）
-  // 処理負荷軽減のため、半径を調整して3回回す
   const iterations = 3;
-  const r = Math.floor(radius / 2); // CSSのblur(15px)に近い見た目にする調整
+  const r = Math.floor(radius / 2);
 
   for (let i = 0; i < iterations; i++) {
     boxBlurH(pixels, width, height, r);
@@ -42,7 +40,6 @@ const applyBlurProcessing = (
   ctx.putImageData(imageData, 0, 0);
 };
 
-// 水平方向のぼかし
 const boxBlurH = (
   pixels: Uint8ClampedArray,
   w: number,
@@ -99,7 +96,6 @@ const boxBlurH = (
   }
 };
 
-// 垂直方向のぼかし
 const boxBlurT = (
   pixels: Uint8ClampedArray,
   w: number,
@@ -212,7 +208,7 @@ export default function Home() {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false); // 保存中のローディング用
+  const [isSaving, setIsSaving] = useState(false);
 
   const MAX_CANVAS_SIZE = 1200;
 
@@ -289,17 +285,30 @@ export default function Home() {
       const bottomCtx = bottomCanvas.getContext("2d");
 
       if (topCtx && bottomCtx) {
-        // 背景用
         bottomCtx.drawImage(img, 0, 0, width, height);
-        // ★アプリ上の見た目はCSSでぼかす（プレビュー用）
         bottomCanvas.style.filter = "blur(15px)";
 
-        // 操作用
         topCtx.globalCompositeOperation = "source-over";
         topCtx.drawImage(img, 0, 0, width, height);
       }
     };
   }, [imageSrc]);
+
+  // ★追加機能: ブラシサイズ変更時にプレビューを中央に表示
+  useEffect(() => {
+    if (!containerRef.current || !imageSrc) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+
+    setPreviewPos({ x: centerX, y: centerY, visible: true });
+
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(() => {
+      setPreviewPos((prev) => ({ ...prev, visible: false }));
+    }, 1500);
+  }, [brushSize, imageSrc]); // brushSizeが変わるたびに実行
 
   const getCoordinates = (e: React.PointerEvent) => {
     const canvas = topCanvasRef.current;
@@ -312,10 +321,35 @@ export default function Home() {
     return { x: x * scaleX, y: y * scaleY };
   };
 
+  // ★修正機能: タップだけで描画（点）されるように修正
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     setIsDrawing(true);
-    draw(e);
+
+    if (!topCanvasRef.current) return;
+    const ctx = topCanvasRef.current.getContext("2d");
+    if (!ctx) return;
+
+    const { x, y } = getCoordinates(e);
+
+    // 描画設定
+    const canvas = topCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scale = canvas.width / rect.width;
+
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.globalAlpha = blurStrength;
+    ctx.lineWidth = brushSize * scale;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    // 点を描画（パスを開始してすぐに閉じることで円を描画）
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y); // 移動せずに線を引く＝点（円）になる
+    ctx.stroke();
+
+    // 描画中はプレビューを隠す
     setPreviewPos((prev) => ({ ...prev, visible: false }));
   };
 
@@ -326,20 +360,14 @@ export default function Home() {
     if (!ctx) return;
     const { x, y } = getCoordinates(e);
 
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.globalAlpha = blurStrength;
-    const canvas = topCanvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const scale = canvas.width / rect.width;
-
-    ctx.lineWidth = brushSize * scale;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+    // 設定は startDrawing から引き継がれるが、念のため
+    // (beginPathがstartDrawingで呼ばれてstrokeされているので、
+    //  ここからは前回の地点から線をつなぐ)
     ctx.lineTo(x, y);
     ctx.stroke();
+
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.globalAlpha = 1.0;
   };
 
   const stopDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -362,21 +390,17 @@ export default function Home() {
     }, 1500);
   };
 
-  // ★修正箇所：ダウンロード処理（JavaScriptによる直接ぼかし計算）
   const handleDownload = () => {
     if (!topCanvasRef.current || !bottomCanvasRef.current || !imageRef.current)
       return;
 
-    // UIをブロックしないようにローディングを表示
     setIsSaving(true);
 
-    // 少し待ってから処理開始（レンダリング更新のため）
     setTimeout(() => {
       const topCanvas = topCanvasRef.current!;
       const width = topCanvas.width;
       const height = topCanvas.height;
 
-      // 1. 出力用Canvas作成
       const outputCanvas = document.createElement("canvas");
       outputCanvas.width = width;
       outputCanvas.height = height;
@@ -387,18 +411,14 @@ export default function Home() {
         return;
       }
 
-      // 2. 背景画像をCanvasに描き、JSで計算してぼかす
-      // これにより「縮小拡大」によるモザイク化を完全に回避
       ctx.drawImage(imageRef.current!, 0, 0, width, height);
 
-      // ここでぼかし処理を実行（少し重いが、確実に滑らかになる）
-      applyBlurProcessing(ctx, width, height, 20); // 半径20px程度でぼかす
+      // 高品質ぼかし計算
+      applyBlurProcessing(ctx, width, height, 20);
 
-      // 3. 穴あき画像（操作結果）を重ねる
       ctx.globalCompositeOperation = "source-over";
       ctx.drawImage(topCanvas, 0, 0);
 
-      // 4. 保存
       const dataUrl = outputCanvas.toDataURL("image/jpeg", 0.95);
       const link = document.createElement("a");
       link.download = "blur-edited.jpg";
