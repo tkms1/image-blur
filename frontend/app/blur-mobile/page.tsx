@@ -9,22 +9,25 @@ import {
   Button,
   Container,
   Stack,
+  CircularProgress,
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
 
-// キャンバス要素用のスタイル定義（MUI の styled を使用）
-// 通常の canvas タグとして動作させつつ、sx プロパティなどが使いやすくなります
+// キャンバス要素用のスタイル定義
 const StyledCanvas = styled("canvas")({
   display: "block",
   touchAction: "none", // スマホでのスクロール防止
+  maxWidth: "100%", // 画面からはみ出さないように制御
+  height: "auto",
 });
 
 export default function Home() {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   // 2 つの Canvas を管理するための Ref
-  const topCanvasRef = useRef<HTMLCanvasElement>(null); // 通常画像用（削る用）
+  const topCanvasRef = useRef<HTMLCanvasElement>(null); // 通常画像用（削る用・マスク）
   const bottomCanvasRef = useRef<HTMLCanvasElement>(null); // ぼかし画像用（背景）
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -33,53 +36,66 @@ export default function Home() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setIsLoading(true);
     const reader = new FileReader();
     reader.onload = (event) => {
       if (event.target?.result) {
         setImageSrc(event.target.result as string);
+        setIsLoading(false);
       }
     };
     reader.readAsDataURL(file);
   };
 
-  // 画像が読み込まれたら Canvas に描画
+  // 画像が読み込まれたら Canvas に描画（高画質化ロジック）
   useEffect(() => {
     if (!imageSrc || !topCanvasRef.current || !bottomCanvasRef.current) return;
 
     const img = new Image();
     img.src = imageSrc;
     img.onload = () => {
-      const topCtx = topCanvasRef.current?.getContext("2d");
-      const bottomCtx = bottomCanvasRef.current?.getContext("2d");
+      const topCanvas = topCanvasRef.current;
+      const bottomCanvas = bottomCanvasRef.current;
       const container = containerRef.current;
 
-      if (!topCtx || !bottomCtx || !container) return;
+      if (!topCanvas || !bottomCanvas || !container) return;
 
-      // コンテナの幅に合わせてリサイズ
-      const maxWidth = container.clientWidth;
-      const scale = maxWidth / img.width;
-      const width = img.width * scale;
-      const height = img.height * scale;
+      const topCtx = topCanvas.getContext("2d");
+      const bottomCtx = bottomCanvas.getContext("2d");
 
-      // Canvas サイズを設定
-      [topCanvasRef.current, bottomCanvasRef.current].forEach((canvas) => {
-        if (canvas) {
-          canvas.width = width;
-          canvas.height = height;
-          // 表示サイズも CSS で強制（高解像度ディスプレイ対応）
-          canvas.style.width = `${width}px`;
-          canvas.style.height = `${height}px`;
-        }
-      });
+      if (!topCtx || !bottomCtx) return;
 
-      // 1. 下の Canvas に通常画像を描画（CSS でぼかす）
-      bottomCtx.drawImage(img, 0, 0, width, height);
-      if (bottomCanvasRef.current) {
-        bottomCanvasRef.current.style.filter = "blur(15px)";
-      }
+      // 1. キャンバスの内部解像度を実画像サイズに設定（高画質化の鍵）
+      // 注意：画像が極端に大きい場合（例：10000px）はパフォーマンスのため制限をかけるべきですが、
+      // 今回は「画質をキープしたい」という要望なので、自然サイズを採用します。
+      // 必要であれば max(4096, img.width) などに制限可能です。
+      const displayWidth = container.clientWidth;
+      const scale = displayWidth / img.width;
+      const displayHeight = img.height * scale;
 
-      // 2. 上の Canvas に通常画像を描画
-      topCtx.drawImage(img, 0, 0, width, height);
+      // 内部解像度 = 実画像サイズ
+      topCanvas.width = img.width;
+      topCanvas.height = img.height;
+      bottomCanvas.width = img.width;
+      bottomCanvas.height = img.height;
+
+      // 表示サイズ（CSS）= コンテナに収まるサイズ
+      topCanvas.style.width = `${displayWidth}px`;
+      topCanvas.style.height = `${displayHeight}px`;
+      bottomCanvas.style.width = `${displayWidth}px`;
+      bottomCanvas.style.height = `${displayHeight}px`;
+
+      // 2. 下の Canvas に通常画像を描画
+      bottomCtx.drawImage(img, 0, 0, img.width, img.height);
+
+      // CSS フィルタでぼかしを適用（内部解像度が高いため、ぼかしも綺麗にかかる）
+      // 画像サイズが大きい場合、blur の値も大きくした方が良い場合がありますが、
+      // ここでは CSS ピクセル基準で適用されるため、視覚的な調整が必要です。
+      // 高解像度化により、相対的にぼかしが弱く見える可能性があるため、値を少し大きめに設定しています。
+      bottomCanvas.style.filter = "blur(20px)";
+
+      // 3. 上の Canvas に通常画像を描画（これを削っていく）
+      topCtx.drawImage(img, 0, 0, img.width, img.height);
     };
   }, [imageSrc]);
 
@@ -100,15 +116,28 @@ export default function Home() {
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawing || !topCanvasRef.current) return;
 
-    const ctx = topCanvasRef.current.getContext("2d");
+    const canvas = topCanvasRef.current;
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const rect = topCanvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const rect = canvas.getBoundingClientRect();
+
+    // 【重要】座標の補正
+    // マウスの位置（CSS ピクセル）を、キャンバスの内部解像度（実ピクセル）に変換する
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+
+    // ブラシサイズの補正
+    // 表示上の 40px を、内部解像度上のサイズに変換する
+    // 平均スケールを使用して円に近いブラシを維持
+    const averageScale = (scaleX + scaleY) / 2;
+    const brushSize = 40 * averageScale;
 
     ctx.globalCompositeOperation = "destination-out";
-    ctx.lineWidth = 40;
+    ctx.lineWidth = brushSize;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
@@ -141,7 +170,7 @@ export default function Home() {
       <Card elevation={3}>
         <CardContent>
           <Typography variant="h5" component="h1" gutterBottom align="center">
-            スワイプでぼかし
+            高画質スワイプぼかし
           </Typography>
 
           {/* 画像アップロードエリア */}
@@ -156,22 +185,26 @@ export default function Home() {
               }}
             >
               <Typography variant="body1" color="text.secondary">
-                画像を選択してください
+                高解像度の画像も綺麗に表示・処理できます
               </Typography>
-              <Button
-                variant="contained"
-                component="label"
-                fullWidth
-                sx={{ maxWidth: 300 }}
-              >
-                画像をアップロード
-                <input
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  onChange={handleImageUpload}
-                />
-              </Button>
+              {isLoading ? (
+                <CircularProgress />
+              ) : (
+                <Button
+                  variant="contained"
+                  component="label"
+                  fullWidth
+                  sx={{ maxWidth: 300 }}
+                >
+                  画像をアップロード
+                  <input
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={handleImageUpload}
+                  />
+                </Button>
+              )}
             </Box>
           )}
 
@@ -185,7 +218,9 @@ export default function Home() {
                   position: "relative",
                   width: "100%",
                   margin: "0 auto",
-                  // 高さなどは JS で制御するため、ここでは幅のみ制限
+                  borderRadius: 2,
+                  overflow: "hidden", // はみ出し防止
+                  boxShadow: 1,
                 }}
               >
                 {/* 下の Canvas (ぼかし画像) */}
@@ -207,8 +242,10 @@ export default function Home() {
                     position: "relative",
                     zIndex: 2,
                     cursor: "crosshair",
-                    width: "100%", // 親に合わせて表示
+                    // width/height は JS で制御するため、ここでは auto
+                    width: "auto",
                     height: "auto",
+                    touchAction: "none",
                   }}
                   onPointerDown={startDrawing}
                   onPointerMove={draw}
