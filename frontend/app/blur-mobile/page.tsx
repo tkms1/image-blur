@@ -22,8 +22,8 @@ import FileDownloadIcon from "@mui/icons-material/FileDownload";
 const StyledCanvas = styled("canvas")({
   display: "block",
   touchAction: "none", // スマホでのスクロール防止
-  maxWidth: "100%", // 画面からはみ出さないように制御
-  height: "auto",
+  // maxWidth: "100%", // 画面からはみ出さないように制御
+  // height: "auto",
 });
 
 // プレビュー用の円の Props 型定義
@@ -102,7 +102,7 @@ export default function Home() {
     const img = new Image();
     img.src = imageSrc;
     img.onload = () => {
-      imageRef.current = img; // 画像オブジェクトを保存
+      imageRef.current = img;
 
       const topCanvas = topCanvasRef.current;
       const bottomCanvas = bottomCanvasRef.current;
@@ -115,10 +115,13 @@ export default function Home() {
 
       if (!topCtx || !bottomCtx) return;
 
-      // 1. キャンバスの内部解像度を実画像サイズに設定（高画質化の鍵）
-      const displayWidth = container.clientWidth;
-      const scale = displayWidth / img.width;
-      const displayHeight = img.height * scale;
+      // コンテナの幅を取得（パディング等を考慮して少し余裕を持たせても良い）
+      const containerWidth = container.clientWidth;
+
+      // 画像のアスペクト比から表示サイズを計算
+      const aspectRatio = img.height / img.width;
+      const displayWidth = containerWidth;
+      const displayHeight = containerWidth * aspectRatio;
 
       // 内部解像度 = 実画像サイズ
       topCanvas.width = img.width;
@@ -126,11 +129,15 @@ export default function Home() {
       bottomCanvas.width = img.width;
       bottomCanvas.height = img.height;
 
-      // 表示サイズ（CSS）= コンテナに収まるサイズ
+      // 表示サイズ（CSS）をピクセルで固定
+      // これによりCSSの干渉を受けず、計算通りの座標が得られます
       topCanvas.style.width = `${displayWidth}px`;
       topCanvas.style.height = `${displayHeight}px`;
       bottomCanvas.style.width = `${displayWidth}px`;
       bottomCanvas.style.height = `${displayHeight}px`;
+
+      // 以下描画処理はそのまま
+      bottomCtx.drawImage(img, 0, 0, img.width, img.height);
 
       // 2. 下の Canvas に通常画像を描画（ぼかしは CSS で適用）
       bottomCtx.drawImage(img, 0, 0, img.width, img.height);
@@ -206,6 +213,8 @@ export default function Home() {
 
   // 描画開始
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault(); // 追加：ブラウザ標準の動作をブロック
+
     setIsDrawing(true);
     const { x, y } = getCoordinates(e);
     startPos.current = { x, y }; // タップ判定用に開始位置を保存
@@ -218,6 +227,8 @@ export default function Home() {
 
   // 描画終了
   const stopDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault(); // 追加：ブラウザ標準の動作をブロック
+
     if (!isDrawing) return;
     setIsDrawing(false);
 
@@ -266,6 +277,8 @@ export default function Home() {
 
   // 描画処理（スワイプ）
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault(); // 追加
+
     if (!isDrawing || !topCanvasRef.current) return;
 
     const canvas = topCanvasRef.current;
