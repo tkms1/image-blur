@@ -64,7 +64,7 @@ const AppHeaderClientOnly = () => {
       ? "/signup"
       : `/signup?redirect_to=${encodeURIComponent(targetUrl)}`;
 
-  const navItems = [{ name: "ホーム", link: "/blur" }];
+  const navItems = [{ name: "ホーム", link: "/blur-mobile" }];
   // console.log("pathname:", pathname);
   return (
     <>

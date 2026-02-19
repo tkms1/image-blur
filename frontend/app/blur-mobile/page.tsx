@@ -26,7 +26,6 @@ const CanvasContainer = styled("div")({
   backgroundColor: "#f0f0f0",
   boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
   WebkitTapHighlightColor: "transparent",
-  // ここでの touch-action は auto にし、Canvas側で制御する
 });
 
 // Canvasの共通スタイル
@@ -159,18 +158,17 @@ export default function Home() {
         // 下層：背景用画像を描画
         bottomCtx.drawImage(img, 0, 0, width, height);
 
-        // ★重要修正：見た目のぼかしはCSSで行う（全機種で確実に表示される）
-        // blur(15px) 相当
+        // ★アプリ上の見た目はCSSでぼかす（スムーズなぼかし）
         bottomCanvas.style.filter = "blur(15px)";
 
-        // 上層：操作用画像を描画（最初はそのまま表示）
+        // 上層：操作用画像を描画
         topCtx.globalCompositeOperation = "source-over";
         topCtx.drawImage(img, 0, 0, width, height);
       }
     };
   }, [imageSrc]);
 
-  // 座標取得（PointerEventから正確なCanvas内座標を計算）
+  // 座標取得
   const getCoordinates = (e: React.PointerEvent) => {
     const canvas = topCanvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -179,7 +177,6 @@ export default function Home() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // 表示サイズと内部解像度の比率
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
@@ -191,34 +188,27 @@ export default function Home() {
 
   // 描画開始
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    // Canvas上でのタッチのみスクロールを無効化
     e.preventDefault();
     setIsDrawing(true);
     draw(e);
-
-    // 描画中はプレビューを消す
     setPreviewPos((prev) => ({ ...prev, visible: false }));
   };
 
   // 描画処理
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    // Canvas上でのタッチのみスクロールを無効化
     e.preventDefault();
-
     if (!isDrawing || !topCanvasRef.current) return;
     const ctx = topCanvasRef.current.getContext("2d");
     if (!ctx) return;
 
     const { x, y } = getCoordinates(e);
 
-    // 画像を削るモード
     ctx.globalCompositeOperation = "destination-out";
     ctx.globalAlpha = blurStrength;
 
-    // ブラシサイズ計算（表示倍率に合わせて調整）
     const canvas = topCanvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const scale = canvas.width / rect.width; // 解像度/表示幅
+    const scale = canvas.width / rect.width;
 
     ctx.lineWidth = brushSize * scale;
     ctx.lineCap = "round";
@@ -232,20 +222,16 @@ export default function Home() {
     ctx.globalAlpha = 1.0;
   };
 
-  // 描画終了
   const stopDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     if (!isDrawing) return;
-
     const ctx = topCanvasRef.current?.getContext("2d");
     if (ctx) ctx.beginPath();
     setIsDrawing(false);
   };
 
-  // プレビュー表示
   const handleContainerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isDrawing || !containerRef.current) return;
-
     const rect = containerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -258,54 +244,57 @@ export default function Home() {
     }, 1500);
   };
 
-  // ダウンロード機能（スマホ対応・ぼかし焼き付け）
+  // ★修正箇所：ダウンロード機能（モザイク廃止・スムーズぼかし適用）
   const handleDownload = () => {
     if (!topCanvasRef.current || !bottomCanvasRef.current) return;
 
     const topCanvas = topCanvasRef.current;
-    const bottomCanvas = bottomCanvasRef.current; // 元画像が描画されている
+    const bottomCanvas = bottomCanvasRef.current;
     const width = topCanvas.width;
     const height = topCanvas.height;
 
-    // 1. 出力用キャンバス
     const outputCanvas = document.createElement("canvas");
     outputCanvas.width = width;
     outputCanvas.height = height;
     const ctx = outputCanvas.getContext("2d");
     if (!ctx) return;
 
-    // 2. 背景のぼかしを作成（縮小拡大法：全ブラウザ対応で一番安全）
-    // CSSのblurは保存されないため、Canvas上で擬似的にぼかしを作る
-    const blurScale = 0.1; // 10分の1に縮小
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = width * blurScale;
-    tempCanvas.height = height * blurScale;
-    const tempCtx = tempCanvas.getContext("2d");
-
-    if (tempCtx) {
-      // スムーズな補間を有効に
-      tempCtx.imageSmoothingEnabled = true;
-      tempCtx.imageSmoothingQuality = "high";
-      // 小さいキャンバスに描画
-      tempCtx.drawImage(
-        bottomCanvas,
-        0,
-        0,
-        tempCanvas.width,
-        tempCanvas.height,
-      );
+    // 1. 背景のぼかしを描画
+    // モザイク(縮小)を使わず、標準のfilter機能を使ってスムーズにぼかす
+    // ※画像サイズを制限(1200px)しているため、スマホでも filter が動作する可能性が高い
+    if (typeof ctx.filter !== "undefined") {
+      ctx.filter = "blur(15px)"; // CSSと同じ値を指定
+      ctx.drawImage(bottomCanvas, 0, 0);
+      ctx.filter = "none";
+    } else {
+      // 万が一 filter が使えない古い端末用フォールバック
+      // モザイクにならないよう、縮小率を緩和(0.1→0.25)して品質を上げる
+      const blurScale = 0.25;
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = width * blurScale;
+      tempCanvas.height = height * blurScale;
+      const tempCtx = tempCanvas.getContext("2d");
+      if (tempCtx) {
+        tempCtx.imageSmoothingEnabled = true;
+        tempCtx.imageSmoothingQuality = "high";
+        tempCtx.drawImage(
+          bottomCanvas,
+          0,
+          0,
+          tempCanvas.width,
+          tempCanvas.height,
+        );
+      }
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(tempCanvas, 0, 0, width, height);
     }
 
-    // 小さい画像を元のサイズに引き伸ばして描画（これでぼやける）
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(tempCanvas, 0, 0, width, height);
-
-    // 3. その上に削った画像（穴あき画像）を重ねる
+    // 2. その上に削った画像を重ねる
     ctx.globalCompositeOperation = "source-over";
     ctx.drawImage(topCanvas, 0, 0);
 
-    // 4. 保存
+    // 3. 保存
     const dataUrl = outputCanvas.toDataURL("image/jpeg", 0.9);
     const link = document.createElement("a");
     link.download = "blur-edited.jpg";
@@ -317,8 +306,6 @@ export default function Home() {
     if (!topCanvasRef.current || !imageRef.current) return;
     const ctx = topCanvasRef.current.getContext("2d");
     if (!ctx) return;
-
-    // 画像を再描画して穴を塞ぐ
     ctx.globalCompositeOperation = "source-over";
     ctx.drawImage(
       imageRef.current,
@@ -330,7 +317,6 @@ export default function Home() {
   };
 
   return (
-    // ★重要: Container自体の touchAction は auto (デフォルト) に戻すことでページスクロール可能にする
     <Container maxWidth="sm" sx={{ py: 3, minHeight: "100vh" }}>
       <Card elevation={3}>
         <CardContent>
@@ -387,7 +373,7 @@ export default function Home() {
 
               <CanvasContainer
                 ref={containerRef}
-                style={{ height: containerHeight }} // 計算した高さを適用
+                style={{ height: containerHeight }}
                 onPointerMove={handleContainerMove}
                 onPointerLeave={() =>
                   setPreviewPos((p) => ({ ...p, visible: false }))
@@ -399,13 +385,7 @@ export default function Home() {
                   y={previewPos.y}
                   opacity={previewPos.visible ? 1 : 0}
                 />
-
-                {/* 背景：CSSでぼかす (z-index: 1) */}
                 <StyledCanvas ref={bottomCanvasRef} sx={{ zIndex: 1 }} />
-
-                {/* 前景：操作用 (z-index: 2) 
-                    touch-action: none をここに指定することで、
-                    「このキャンバス上での操作」だけスクロールしなくなる */}
                 <StyledCanvas
                   ref={topCanvasRef}
                   sx={{ zIndex: 2, touchAction: "none", cursor: "crosshair" }}
