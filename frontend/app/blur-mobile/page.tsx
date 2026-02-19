@@ -311,12 +311,31 @@ export default function Home() {
     };
   };
 
+  // Canvas にぼかしを適用する関数（モバイル対応）
+  const applyBlurToCanvas = (
+    sourceCanvas: HTMLCanvasElement,
+    targetCtx: CanvasRenderingContext2D,
+    blurAmount: number,
+  ) => {
+    // ctx.filter がサポートされているかチェック
+    if (typeof targetCtx.filter !== "undefined") {
+      targetCtx.filter = `blur(${blurAmount}px)`;
+      targetCtx.drawImage(sourceCanvas, 0, 0);
+      targetCtx.filter = "none";
+    } else {
+      // フォールバック：単純に画像を描画（ぼかしなし）
+      targetCtx.drawImage(sourceCanvas, 0, 0);
+    }
+  };
+
   // ダウンロード機能（容量削減版・ぼかし適用修正）
   const handleDownload = () => {
-    if (!imageRef.current || !topCanvasRef.current) return;
+    if (!imageRef.current || !topCanvasRef.current || !bottomCanvasRef.current)
+      return;
 
     const img = imageRef.current;
     const topCanvas = topCanvasRef.current;
+    const bottomCanvas = bottomCanvasRef.current;
 
     // 一時キャンバスを作成（元画像の解像度）
     const tempCanvas = document.createElement("canvas");
@@ -326,10 +345,9 @@ export default function Home() {
 
     if (!ctx) return;
 
-    // 1. 背景にぼかし画像を描画（ctx.filter を使用して実際にぼかす）
-    ctx.filter = "blur(20px)";
-    ctx.drawImage(img, 0, 0, img.width, img.height);
-    ctx.filter = "none"; // リセット
+    // 1. 背景にぼかし画像を描画
+    // bottomCanvas には既に元画像が描画されているので、それを使用してぼかしを適用
+    applyBlurToCanvas(bottomCanvas, ctx, 20);
 
     // 2. 上に編集済み画像（穴あき）を描画
     // destination-out で削った部分が透明になっているので、
