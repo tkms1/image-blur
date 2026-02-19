@@ -11,9 +11,12 @@ import {
   Stack,
   CircularProgress,
   Fab,
+  Slider,
+  Grid,
+  Paper,
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
-import TouchAppIcon from "@mui/icons-material/TouchApp";
+import TuneIcon from "@mui/icons-material/Tune";
 
 // キャンバス要素用のスタイル定義
 const StyledCanvas = styled("canvas")({
@@ -27,6 +30,10 @@ export default function Home() {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // 設定値の状態
+  const [brushSize, setBrushSize] = useState(50); // ブラシサイズ (表示上の px)
+  const [blurStrength, setBlurStrength] = useState(1.0); // ぼかしの強さ (0.1 ~ 1.0)
 
   // 2 つの Canvas を管理するための Ref
   const topCanvasRef = useRef<HTMLCanvasElement>(null); // 通常画像用（削る用・マスク）
@@ -154,12 +161,17 @@ export default function Home() {
       (canvas.width / canvas.getBoundingClientRect().width +
         canvas.height / canvas.getBoundingClientRect().height) /
       2;
-    const radius = 40 * averageScale; // ブラシサイズと同じ半径
+    // state の brushSize を使用して半径を計算
+    const radius = (brushSize / 2) * averageScale;
 
     ctx.globalCompositeOperation = "destination-out";
+    ctx.globalAlpha = blurStrength; // 強さを適用
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2, true);
     ctx.fill();
+
+    // リセット
+    ctx.globalAlpha = 1.0;
   };
 
   // 描画処理（スワイプ）
@@ -172,12 +184,13 @@ export default function Home() {
 
     const { x, y, scaleX, scaleY } = getCoordinates(e);
 
-    // ブラシサイズの補正
+    // ブラシサイズの補正 (state の値を使用)
     const averageScale = (scaleX + scaleY) / 2;
-    const brushSize = 40 * averageScale;
+    const brushSizeScaled = brushSize * averageScale;
 
     ctx.globalCompositeOperation = "destination-out";
-    ctx.lineWidth = brushSize;
+    ctx.globalAlpha = blurStrength; // 強さを適用
+    ctx.lineWidth = brushSizeScaled;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
@@ -185,6 +198,9 @@ export default function Home() {
     ctx.stroke();
     ctx.beginPath();
     ctx.moveTo(x, y);
+
+    // リセット
+    ctx.globalAlpha = 1.0;
   };
 
   // リセット機能
@@ -203,6 +219,11 @@ export default function Home() {
         topCtx.drawImage(img, 0, 0, width, height);
       }
     };
+  };
+
+  // スライダーのラベル表示用
+  const valLabel = (value: number) => {
+    return value.toFixed(1);
   };
 
   return (
@@ -251,6 +272,56 @@ export default function Home() {
           {/* キャンバス表示エリア */}
           {imageSrc && (
             <Box sx={{ mt: 2 }}>
+              {/* 設定パネル */}
+              <Paper elevation={1} sx={{ p: 2, mb: 2, bgcolor: "#f9f9f9" }}>
+                <Stack spacing={3}>
+                  <Box>
+                    <Typography
+                      gutterBottom
+                      variant="body2"
+                      color="text.secondary"
+                    >
+                      ブラシサイズ ({brushSize}px)
+                    </Typography>
+                    <Slider
+                      value={brushSize}
+                      onChange={(_, newValue) =>
+                        setBrushSize(newValue as number)
+                      }
+                      aria-labelledby="brush-size-slider"
+                      valueLabelDisplay="auto"
+                      min={10}
+                      max={200}
+                      step={1}
+                    />
+                  </Box>
+                  <Box>
+                    <Typography
+                      gutterBottom
+                      variant="body2"
+                      color="text.secondary"
+                    >
+                      ぼかしの強さ ({(blurStrength * 100).toFixed(0)}%)
+                    </Typography>
+                    <Slider
+                      value={blurStrength}
+                      onChange={(_, newValue) =>
+                        setBlurStrength(newValue as number)
+                      }
+                      aria-labelledby="blur-strength-slider"
+                      valueLabelDisplay="auto"
+                      getAriaValueText={valLabel}
+                      min={0.05}
+                      max={1.0}
+                      step={0.05}
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      値が小さいほど、何度もなぞる必要があります
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Paper>
+
               {/* キャンバスコンテナ（相対配置） */}
               <Box
                 ref={containerRef}
@@ -261,7 +332,7 @@ export default function Home() {
                   borderRadius: 2,
                   overflow: "hidden",
                   boxShadow: 1,
-                  backgroundColor: "#f0f0f0", // 読み込み中や透明部分の背景色
+                  backgroundColor: "#f0f0f0",
                 }}
               >
                 {/* 下の Canvas (ぼかし画像) */}
@@ -336,9 +407,13 @@ export default function Home() {
           color="primary"
           size="small"
           sx={{ position: "fixed", bottom: 24, right: 24, zIndex: 10 }}
-          onClick={() => alert("タップまたはスワイプでぼかしが入ります")}
+          onClick={() =>
+            alert(
+              "タップまたはスワイプでぼかしが入ります。設定で強さを変更できます。",
+            )
+          }
         >
-          <TouchAppIcon />
+          <TuneIcon />
         </Fab>
       )}
     </Container>
