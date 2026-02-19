@@ -329,15 +329,14 @@ export default function Home() {
   };
 
   // ダウンロード機能（容量削減版・ぼかし適用修正）
+  // ダウンロード機能（修正版：スマホ対応）
   const handleDownload = () => {
-    if (!imageRef.current || !topCanvasRef.current || !bottomCanvasRef.current)
-      return;
+    if (!imageRef.current || !topCanvasRef.current) return;
 
     const img = imageRef.current;
     const topCanvas = topCanvasRef.current;
-    const bottomCanvas = bottomCanvasRef.current;
 
-    // 一時キャンバスを作成（元画像の解像度）
+    // 1. 最終出力用のキャンバスを作成
     const tempCanvas = document.createElement("canvas");
     tempCanvas.width = img.width;
     tempCanvas.height = img.height;
@@ -345,18 +344,40 @@ export default function Home() {
 
     if (!ctx) return;
 
-    // 1. 背景にぼかし画像を描画
-    // bottomCanvas には既に元画像が描画されているので、それを使用してぼかしを適用
-    applyBlurToCanvas(bottomCanvas, ctx, 20);
+    // ---------------------------------------------------------
+    // 2. 背景のぼかし画像を生成（ダウンサンプリング方式）
+    // ---------------------------------------------------------
+    // ctx.filterはスマホで効かないことがあるため、
+    // 画像を一度小さく縮小して描画し、拡大することでぼかしを表現します。
 
-    // 2. 上に編集済み画像（穴あき）を描画
-    // destination-out で削った部分が透明になっているので、
-    // その下のぼかし画像が見えるようになる
+    const blurCanvas = document.createElement("canvas");
+    // 縮小率：小さいほどぼかしが強くなります（0.05 = 1/20サイズ）
+    // CSSの blur(20px) に近い見た目になるよう調整
+    const scaleFactor = 0.05;
+    blurCanvas.width = Math.max(img.width * scaleFactor, 50); // 最低50pxは確保
+    blurCanvas.height = Math.max(img.height * scaleFactor, 50);
+
+    const blurCtx = blurCanvas.getContext("2d");
+    if (blurCtx) {
+      // 画質補間を有効にして滑らかにする
+      blurCtx.imageSmoothingEnabled = true;
+      blurCtx.imageSmoothingQuality = "high";
+      blurCtx.drawImage(img, 0, 0, blurCanvas.width, blurCanvas.height);
+    }
+
+    // 小さい画像を元のサイズに引き伸ばして描画（これでぼやける）
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(blurCanvas, 0, 0, img.width, img.height);
+
+    // ---------------------------------------------------------
+    // 3. 上に編集済み画像（削った画像）を重ねる
+    // ---------------------------------------------------------
     ctx.globalCompositeOperation = "source-over";
     ctx.drawImage(topCanvas, 0, 0, img.width, img.height);
 
-    // 3. ダウンロード実行（JPEG 形式で画質 0.8）
-    const dataUrl = tempCanvas.toDataURL("image/jpeg", 0.8);
+    // 4. ダウンロード実行
+    const dataUrl = tempCanvas.toDataURL("image/jpeg", 0.85);
     const link = document.createElement("a");
     link.download = "edited-image.jpg";
     link.href = dataUrl;
