@@ -10,8 +10,10 @@ import {
   Container,
   Stack,
   CircularProgress,
+  Fab,
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
+import TouchAppIcon from "@mui/icons-material/TouchApp";
 
 // キャンバス要素用のスタイル定義
 const StyledCanvas = styled("canvas")({
@@ -30,6 +32,9 @@ export default function Home() {
   const topCanvasRef = useRef<HTMLCanvasElement>(null); // 通常画像用（削る用・マスク）
   const bottomCanvasRef = useRef<HTMLCanvasElement>(null); // ぼかし画像用（背景）
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // タップ判定用の座標保持
+  const startPos = useRef<{ x: number; y: number } | null>(null);
 
   // 画像のアップロード処理
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -66,9 +71,6 @@ export default function Home() {
       if (!topCtx || !bottomCtx) return;
 
       // 1. キャンバスの内部解像度を実画像サイズに設定（高画質化の鍵）
-      // 注意：画像が極端に大きい場合（例：10000px）はパフォーマンスのため制限をかけるべきですが、
-      // 今回は「画質をキープしたい」という要望なので、自然サイズを採用します。
-      // 必要であれば max(4096, img.width) などに制限可能です。
       const displayWidth = container.clientWidth;
       const scale = displayWidth / img.width;
       const displayHeight = img.height * scale;
@@ -87,29 +89,77 @@ export default function Home() {
 
       // 2. 下の Canvas に通常画像を描画
       bottomCtx.drawImage(img, 0, 0, img.width, img.height);
-
-      // CSS フィルタでぼかしを適用（内部解像度が高いため、ぼかしも綺麗にかかる）
-      // 画像サイズが大きい場合、blur の値も大きくした方が良い場合がありますが、
-      // ここでは CSS ピクセル基準で適用されるため、視覚的な調整が必要です。
-      // 高解像度化により、相対的にぼかしが弱く見える可能性があるため、値を少し大きめに設定しています。
       bottomCanvas.style.filter = "blur(20px)";
 
-      // 3. 上の Canvas に通常画像を描画（これを削っていく）
+      // 3. 上の Canvas に通常画像を描画
       topCtx.drawImage(img, 0, 0, img.width, img.height);
     };
   }, [imageSrc]);
 
+  // 座標変換ヘルパー
+  const getCoordinates = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = topCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0, scaleX: 1, scaleY: 1 };
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+
+    return { x, y, scaleX, scaleY };
+  };
+
   // 描画開始
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     setIsDrawing(true);
+    const { x, y } = getCoordinates(e);
+    startPos.current = { x, y }; // タップ判定用に開始位置を保存
     draw(e);
   };
 
   // 描画終了
-  const stopDrawing = () => {
+  const stopDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
     setIsDrawing(false);
+
     const ctx = topCanvasRef.current?.getContext("2d");
-    if (ctx) ctx.beginPath();
+    if (!ctx || !startPos.current) return;
+
+    const { x: endX, y: endY } = getCoordinates(e);
+
+    // タップ判定：移動距離が小さい場合はタップとして処理
+    const dist = Math.sqrt(
+      Math.pow(endX - startPos.current.x, 2) +
+        Math.pow(endY - startPos.current.y, 2),
+    );
+
+    // 閾値 10px 以下ならタップとみなす
+    if (dist < 10) {
+      tapBlur(endX, endY);
+    }
+
+    ctx.beginPath(); // パスをリセット
+    startPos.current = null;
+  };
+
+  // タップによるぼかし処理（円を描画）
+  const tapBlur = (x: number, y: number) => {
+    const canvas = topCanvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!ctx || !canvas) return;
+
+    const averageScale =
+      (canvas.width / canvas.getBoundingClientRect().width +
+        canvas.height / canvas.getBoundingClientRect().height) /
+      2;
+    const radius = 40 * averageScale; // ブラシサイズと同じ半径
+
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2, true);
+    ctx.fill();
   };
 
   // 描画処理（スワイプ）
@@ -120,19 +170,9 @@ export default function Home() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const rect = canvas.getBoundingClientRect();
-
-    // 【重要】座標の補正
-    // マウスの位置（CSS ピクセル）を、キャンバスの内部解像度（実ピクセル）に変換する
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    const { x, y, scaleX, scaleY } = getCoordinates(e);
 
     // ブラシサイズの補正
-    // 表示上の 40px を、内部解像度上のサイズに変換する
-    // 平均スケールを使用して円に近いブラシを維持
     const averageScale = (scaleX + scaleY) / 2;
     const brushSize = 40 * averageScale;
 
@@ -219,8 +259,9 @@ export default function Home() {
                   width: "100%",
                   margin: "0 auto",
                   borderRadius: 2,
-                  overflow: "hidden", // はみ出し防止
+                  overflow: "hidden",
                   boxShadow: 1,
+                  backgroundColor: "#f0f0f0", // 読み込み中や透明部分の背景色
                 }}
               >
                 {/* 下の Canvas (ぼかし画像) */}
@@ -231,7 +272,7 @@ export default function Home() {
                     top: 0,
                     left: 0,
                     zIndex: 1,
-                    pointerEvents: "none", // 下のキャンバスは操作不可
+                    pointerEvents: "none",
                   }}
                 />
 
@@ -242,7 +283,6 @@ export default function Home() {
                     position: "relative",
                     zIndex: 2,
                     cursor: "crosshair",
-                    // width/height は JS で制御するため、ここでは auto
                     width: "auto",
                     height: "auto",
                     touchAction: "none",
@@ -283,12 +323,24 @@ export default function Home() {
                 align="center"
                 sx={{ mt: 2, color: "text.secondary" }}
               >
-                画像の上を指でなぞると、その部分がぼかされます
+                スワイプまたはタップでぼかしを適用できます
               </Typography>
             </Box>
           )}
         </CardContent>
       </Card>
+
+      {/* ヒント用フロートボタン（装飾） */}
+      {imageSrc && (
+        <Fab
+          color="primary"
+          size="small"
+          sx={{ position: "fixed", bottom: 24, right: 24, zIndex: 10 }}
+          onClick={() => alert("タップまたはスワイプでぼかしが入ります")}
+        >
+          <TouchAppIcon />
+        </Fab>
+      )}
     </Container>
   );
 }
