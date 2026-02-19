@@ -159,6 +159,32 @@ export default function Home() {
     }, 2000);
   };
 
+  // 中央にプレビューを表示するヘルパー
+  const showPreviewAtCenter = () => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+
+    setPreviewPos({ x: centerX, y: centerY, visible: true });
+
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+    }
+
+    previewTimerRef.current = setTimeout(() => {
+      setPreviewPos((prev) => ({ ...prev, visible: false }));
+    }, 2000);
+  };
+
+  // ブラシサイズ変更時に中央にプレビューを表示
+  useEffect(() => {
+    if (imageSrc) {
+      showPreviewAtCenter();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brushSize, imageSrc]);
+
   // 座標変換ヘルパー
   const getCoordinates = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = topCanvasRef.current;
