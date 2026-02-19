@@ -71,7 +71,7 @@ export default function Home() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  // スマホのメモリクラッシュ防止用サイズ制限
+  // スマホのメモリ不足防止用サイズ制限
   const MAX_CANVAS_SIZE = 1200;
 
   const [brushSize, setBrushSize] = useState(50);
@@ -244,7 +244,8 @@ export default function Home() {
     }, 1500);
   };
 
-  // ★修正箇所：ダウンロード機能（モザイク廃止・スムーズぼかし適用）
+  // ★修正箇所：ダウンロード処理
+  // モザイク化（縮小拡大）を完全に廃止し、正規のぼかし処理のみを行う
   const handleDownload = () => {
     if (!topCanvasRef.current || !bottomCanvasRef.current) return;
 
@@ -259,43 +260,32 @@ export default function Home() {
     const ctx = outputCanvas.getContext("2d");
     if (!ctx) return;
 
-    // 1. 背景のぼかしを描画
-    // モザイク(縮小)を使わず、標準のfilter機能を使ってスムーズにぼかす
-    // ※画像サイズを制限(1200px)しているため、スマホでも filter が動作する可能性が高い
-    if (typeof ctx.filter !== "undefined") {
-      ctx.filter = "blur(15px)"; // CSSと同じ値を指定
+    // 1. 背景のぼかし画像を生成
+    // モザイク処理を削除し、ブラウザ標準の高画質ぼかし(blur filter)を使用
+    // ※bottomCanvasには元画像が描画されています
+
+    const hasFilterSupport = typeof ctx.filter !== "undefined";
+
+    if (hasFilterSupport) {
+      // プレビューと同じ 'blur(15px)' を適用
+      ctx.filter = "blur(15px)";
       ctx.drawImage(bottomCanvas, 0, 0);
       ctx.filter = "none";
     } else {
-      // 万が一 filter が使えない古い端末用フォールバック
-      // モザイクにならないよう、縮小率を緩和(0.1→0.25)して品質を上げる
-      const blurScale = 0.25;
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = width * blurScale;
-      tempCanvas.height = height * blurScale;
-      const tempCtx = tempCanvas.getContext("2d");
-      if (tempCtx) {
-        tempCtx.imageSmoothingEnabled = true;
-        tempCtx.imageSmoothingQuality = "high";
-        tempCtx.drawImage(
-          bottomCanvas,
-          0,
-          0,
-          tempCanvas.width,
-          tempCanvas.height,
-        );
-      }
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(tempCanvas, 0, 0, width, height);
+      // 万が一 filter 未対応の場合のフォールバック
+      // モザイクにならないよう、単純に元画像を描画（ぼかしなし）するか
+      // 重ね合わせで擬似的なぼかしを作る
+      // ここでは最低限モザイク化を防ぐため、そのまま描画（鮮明だがモザイクよりマシ）
+      ctx.drawImage(bottomCanvas, 0, 0);
     }
 
-    // 2. その上に削った画像を重ねる
+    // 2. その上に「穴の空いた画像（topCanvas）」を重ねる
+    // 穴の部分から、下の「ぼかした背景」が見えるようになる
     ctx.globalCompositeOperation = "source-over";
     ctx.drawImage(topCanvas, 0, 0);
 
-    // 3. 保存
-    const dataUrl = outputCanvas.toDataURL("image/jpeg", 0.9);
+    // 3. 高画質で保存
+    const dataUrl = outputCanvas.toDataURL("image/jpeg", 0.95);
     const link = document.createElement("a");
     link.download = "blur-edited.jpg";
     link.href = dataUrl;
