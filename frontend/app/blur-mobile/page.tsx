@@ -132,7 +132,7 @@ export default function Home() {
       bottomCanvas.style.width = `${displayWidth}px`;
       bottomCanvas.style.height = `${displayHeight}px`;
 
-      // 2. 下の Canvas に通常画像を描画
+      // 2. 下の Canvas に通常画像を描画（ぼかしは CSS で適用）
       bottomCtx.drawImage(img, 0, 0, img.width, img.height);
       bottomCanvas.style.filter = "blur(20px)";
 
@@ -311,14 +311,12 @@ export default function Home() {
     };
   };
 
-  // ダウンロード機能（容量削減版）
+  // ダウンロード機能（容量削減版・ぼかし適用修正）
   const handleDownload = () => {
-    if (!imageRef.current || !topCanvasRef.current || !bottomCanvasRef.current)
-      return;
+    if (!imageRef.current || !topCanvasRef.current) return;
 
     const img = imageRef.current;
     const topCanvas = topCanvasRef.current;
-    const bottomCanvas = bottomCanvasRef.current;
 
     // 一時キャンバスを作成（元画像の解像度）
     const tempCanvas = document.createElement("canvas");
@@ -328,15 +326,18 @@ export default function Home() {
 
     if (!ctx) return;
 
-    // 1. 背景にぼかし画像を描画
-    // 下のキャンバスに描画済みのぼかし画像を使う（CSS filter ではなく実ピクセル）
-    ctx.drawImage(bottomCanvas, 0, 0);
+    // 1. 背景にぼかし画像を描画（ctx.filter を使用して実際にぼかす）
+    ctx.filter = "blur(20px)";
+    ctx.drawImage(img, 0, 0, img.width, img.height);
+    ctx.filter = "none"; // リセット
 
     // 2. 上に編集済み画像（穴あき）を描画
-    ctx.drawImage(topCanvas, 0, 0);
+    // destination-out で削った部分が透明になっているので、
+    // その下のぼかし画像が見えるようになる
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(topCanvas, 0, 0, img.width, img.height);
 
     // 3. ダウンロード実行（JPEG 形式で画質 0.8）
-    // PNG は可逆圧縮で容量が大きくなりやすいため、JPEG を使用して容量を削減
     const dataUrl = tempCanvas.toDataURL("image/jpeg", 0.8);
     const link = document.createElement("a");
     link.download = "edited-image.jpg";
