@@ -16,6 +16,7 @@ import {
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
 import TuneIcon from "@mui/icons-material/Tune";
+import FileDownloadIcon from "@mui/icons-material/FileDownload";
 
 // キャンバス要素用のスタイル定義
 const StyledCanvas = styled("canvas")({
@@ -70,6 +71,7 @@ export default function Home() {
   const topCanvasRef = useRef<HTMLCanvasElement>(null); // 通常画像用（削る用・マスク）
   const bottomCanvasRef = useRef<HTMLCanvasElement>(null); // ぼかし画像用（背景）
   const containerRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null); // 元画像を保持
 
   // タップ判定用の座標保持
   const startPos = useRef<{ x: number; y: number } | null>(null);
@@ -100,6 +102,8 @@ export default function Home() {
     const img = new Image();
     img.src = imageSrc;
     img.onload = () => {
+      imageRef.current = img; // 画像オブジェクトを保存
+
       const topCanvas = topCanvasRef.current;
       const bottomCanvas = bottomCanvasRef.current;
       const container = containerRef.current;
@@ -307,6 +311,38 @@ export default function Home() {
     };
   };
 
+  // ダウンロード機能
+  const handleDownload = () => {
+    if (!imageRef.current || !topCanvasRef.current) return;
+
+    const img = imageRef.current;
+    const topCanvas = topCanvasRef.current;
+
+    // 一時キャンバスを作成（元画像の解像度）
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = img.width;
+    tempCanvas.height = img.height;
+    const ctx = tempCanvas.getContext("2d");
+
+    if (!ctx) return;
+
+    // 1. 背景にぼかし画像を描画
+    // CSS の filter は drawImage には反映されないため、ctx.filter を使用
+    ctx.filter = "blur(20px)"; // CSS と同じ値
+    ctx.drawImage(img, 0, 0);
+    ctx.filter = "none"; // リセット
+
+    // 2. 上に編集済み画像（穴あき）を描画
+    ctx.drawImage(topCanvas, 0, 0);
+
+    // 3. ダウンロード実行
+    const dataUrl = tempCanvas.toDataURL("image/png");
+    const link = document.createElement("a");
+    link.download = "edited-image.png";
+    link.href = dataUrl;
+    link.click();
+  };
+
   // スライダーのラベル表示用
   const valLabel = (value: number) => {
     return value.toFixed(1);
@@ -485,6 +521,14 @@ export default function Home() {
                   onClick={handleReset}
                 >
                   リセット
+                </Button>
+                <Button
+                  variant="contained"
+                  color="success"
+                  startIcon={<FileDownloadIcon />}
+                  onClick={handleDownload}
+                >
+                  保存
                 </Button>
                 <Button
                   variant="contained"
