@@ -1,257 +1,525 @@
 "use client";
+"use no memo";
 
-import React, { useRef, useState, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Box,
+  Typography,
   Card,
   CardContent,
-  Typography,
-  Button,
+  Slider,
+  IconButton,
+  useTheme,
+  Tooltip,
+  Grid,
   Container,
-  Stack,
+  AppBar,
+  Toolbar,
+  Button,
+  Paper,
 } from "@mui/material";
-import { styled } from "@mui/material/styles";
+import {
+  Download as DownloadIcon,
+  Upload as UploadIcon,
+  Undo as UndoIcon,
+  Redo as RedoIcon,
+  Refresh as RefreshIcon,
+  BlurOn as BlurOnIcon,
+} from "@mui/icons-material";
 
-// キャンバス要素用のスタイル定義（MUI の styled を使用）
-// 通常の canvas タグとして動作させつつ、sx プロパティなどが使いやすくなります
-const StyledCanvas = styled("canvas")({
-  display: "block",
-  touchAction: "none", // スマホでのスクロール防止
-});
-
-export default function Home() {
+const BlurTool = () => {
+  const theme = useTheme();
   const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
 
-  // 2 つの Canvas を管理するための Ref
-  const topCanvasRef = useRef<HTMLCanvasElement>(null); // 通常画像用（削る用）
-  const bottomCanvasRef = useRef<HTMLCanvasElement>(null); // ぼかし画像用（背景）
-  const containerRef = useRef<HTMLDivElement>(null);
+  // 描画状態の管理
+  const isDrawingRef = useRef(false);
+  const [isMouseDown, setIsMouseDown] = useState(false);
 
-  // 画像のアップロード処理
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const originalImageRef = useRef<HTMLImageElement | null>(null);
+  const workingCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // ズーム機能
+  const [zoom, setZoom] = useState(1);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // ぼかし設定
+  const [blurRadius, setBlurRadius] = useState(20);
+  const [blurSize, setBlurSize] = useState(50);
+
+  // 履歴管理 (Undo/Redo)
+  const [canvasHistory, setCanvasHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const maxHistorySteps = 20;
+  const [lastDrawTime, setLastDrawTime] = useState(0);
+
+  // ===== キャンバス状態を保存 (Undo 用) =====
+  const saveCanvasState = () => {
+    if (!workingCanvasRef.current) return;
+    const workingCanvas = workingCanvasRef.current;
+    const dataUrl = workingCanvas.toDataURL();
+
+    setCanvasHistory((prev) => {
+      const newHistory = prev.slice(0, historyIndex + 1);
+      newHistory.push(dataUrl);
+      if (newHistory.length > maxHistorySteps) newHistory.shift();
+      return newHistory;
+    });
+    setHistoryIndex((prev) => prev + 1);
+  };
+
+  // ===== 元に戻す =====
+  const undoLastAction = () => {
+    setCanvasHistory((prevHistory) => {
+      const newIndex = historyIndex - 1;
+      if (newIndex < 0) return prevHistory;
+      restoreHistory(prevHistory, newIndex);
+      return prevHistory;
+    });
+  };
+
+  // ===== やり直し =====
+  const redoLastAction = () => {
+    setCanvasHistory((prevHistory) => {
+      const newIndex = historyIndex + 1;
+      if (newIndex >= prevHistory.length) return prevHistory;
+      restoreHistory(prevHistory, newIndex);
+      return prevHistory;
+    });
+  };
+
+  // 履歴復元ヘルパー
+  const restoreHistory = (history: string[], index: number) => {
+    const state = history[index];
+    if (!workingCanvasRef.current || !canvasRef.current) return;
+
+    const workingCanvas = workingCanvasRef.current;
+    const workingCtx = workingCanvas.getContext("2d");
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!workingCtx || !ctx) return;
+
+    const img = new Image();
+    img.onload = () => {
+      workingCtx.clearRect(0, 0, workingCanvas.width, workingCanvas.height);
+      workingCtx.drawImage(img, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(workingCanvas, 0, 0);
+      setHistoryIndex(index);
+    };
+    img.src = state;
+  };
+
+  // キャンバス初期化と描画（高画質維持）
+  useEffect(() => {
+    if (!imageSrc || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+
+    img.onload = () => {
+      canvas.width = img.width;
+      canvas.height = img.height;
+
+      originalImageRef.current = img;
+
+      if (!workingCanvasRef.current) {
+        workingCanvasRef.current = document.createElement("canvas");
+      }
+      const workingCanvas = workingCanvasRef.current;
+      workingCanvas.width = canvas.width;
+      workingCanvas.height = canvas.height;
+
+      const workingCtx = workingCanvas.getContext("2d");
+      if (!workingCtx) return;
+
+      workingCtx.clearRect(0, 0, workingCanvas.width, workingCanvas.height);
+      workingCtx.drawImage(img, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(workingCanvas, 0, 0);
+
+      saveCanvasState();
+      setZoom(1);
+    };
+    img.src = imageSrc;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageSrc]);
+
+  // ズーム操作 (Ctrl + Wheel)
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = -e.deltaY * 0.001;
+        setZoom((prevZoom) => Math.min(Math.max(prevZoom + delta, 0.1), 5));
+      }
+    };
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => container.removeEventListener("wheel", handleWheel);
+  }, [imageSrc]);
+
+  // ファイルアップロード処理
+  const processFile = (file: File) => {
+    if (!file.type.match("image.*")) {
+      alert("画像ファイルを選択してください");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (event) => {
       if (event.target?.result) {
         setImageSrc(event.target.result as string);
+        setCanvasHistory([]);
+        setHistoryIndex(-1);
       }
     };
     reader.readAsDataURL(file);
   };
 
-  // 画像が読み込まれたら Canvas に描画
-  useEffect(() => {
-    if (!imageSrc || !topCanvasRef.current || !bottomCanvasRef.current) return;
-
-    const img = new Image();
-    img.src = imageSrc;
-    img.onload = () => {
-      const topCtx = topCanvasRef.current?.getContext("2d");
-      const bottomCtx = bottomCanvasRef.current?.getContext("2d");
-      const container = containerRef.current;
-
-      if (!topCtx || !bottomCtx || !container) return;
-
-      // コンテナの幅に合わせてリサイズ
-      const maxWidth = container.clientWidth;
-      const scale = maxWidth / img.width;
-      const width = img.width * scale;
-      const height = img.height * scale;
-
-      // Canvas サイズを設定
-      [topCanvasRef.current, bottomCanvasRef.current].forEach((canvas) => {
-        if (canvas) {
-          canvas.width = width;
-          canvas.height = height;
-          // 表示サイズも CSS で強制（高解像度ディスプレイ対応）
-          canvas.style.width = `${width}px`;
-          canvas.style.height = `${height}px`;
-        }
-      });
-
-      // 1. 下の Canvas に通常画像を描画（CSS でぼかす）
-      bottomCtx.drawImage(img, 0, 0, width, height);
-      if (bottomCanvasRef.current) {
-        bottomCanvasRef.current.style.filter = "blur(15px)";
-      }
-
-      // 2. 上の Canvas に通常画像を描画
-      topCtx.drawImage(img, 0, 0, width, height);
-    };
-  }, [imageSrc]);
-
-  // 描画開始
-  const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    setIsDrawing(true);
-    draw(e);
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
   };
 
-  // 描画終了
+  // 座標計算（ズーム倍率を考慮）
+  const getCanvasCoords = (clientX: number, clientY: number) => {
+    if (!canvasRef.current) return { x: 0, y: 0 };
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+    return { x, y };
+  };
+
+  // ブラシぼかし適用ロジック
+  const applyBlurAt = (x: number, y: number) => {
+    if (
+      !workingCanvasRef.current ||
+      !originalImageRef.current ||
+      !canvasRef.current
+    )
+      return;
+
+    const workingCanvas = workingCanvasRef.current;
+    const workingCtx = workingCanvas.getContext("2d");
+    if (!workingCtx) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const displayScale = rect.width / workingCanvas.width;
+    const physicalBlurSize = blurSize / displayScale;
+    const radius = physicalBlurSize / 2;
+
+    const padding = blurRadius * 3;
+    const bufferSize = physicalBlurSize + padding * 2;
+    const blurCanvas = document.createElement("canvas");
+    blurCanvas.width = bufferSize;
+    blurCanvas.height = bufferSize;
+    const blurCtx = blurCanvas.getContext("2d");
+    if (!blurCtx) return;
+
+    blurCtx.filter = `blur(${blurRadius}px)`;
+
+    const srcX = x - radius - padding;
+    const srcY = y - radius - padding;
+
+    blurCtx.drawImage(
+      workingCanvas,
+      srcX,
+      srcY,
+      bufferSize,
+      bufferSize,
+      0,
+      0,
+      bufferSize,
+      bufferSize,
+    );
+
+    workingCtx.save();
+    workingCtx.beginPath();
+    workingCtx.arc(x, y, radius, 0, Math.PI * 2);
+    workingCtx.closePath();
+    workingCtx.clip();
+
+    workingCtx.globalCompositeOperation = "source-over";
+    workingCtx.drawImage(
+      blurCanvas,
+      padding,
+      padding,
+      physicalBlurSize,
+      physicalBlurSize,
+      x - radius,
+      y - radius,
+      physicalBlurSize,
+      physicalBlurSize,
+    );
+    workingCtx.restore();
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(workingCanvas, 0, 0);
+    }
+
+    const now = Date.now();
+    if (now - lastDrawTime > 300) {
+      saveCanvasState();
+      setLastDrawTime(now);
+    }
+  };
+
+  // イベントハンドラ
+  const startDrawing = (clientX: number, clientY: number) => {
+    if (!imageSrc) return;
+    isDrawingRef.current = true;
+    setIsMouseDown(true);
+    const coords = getCanvasCoords(clientX, clientY);
+    applyBlurAt(coords.x, coords.y);
+  };
+
+  const moveDrawing = (clientX: number, clientY: number) => {
+    if (!imageSrc || !isDrawingRef.current) return;
+    const coords = getCanvasCoords(clientX, clientY);
+
+    const now = Date.now();
+    if (now - lastDrawTime > 30) {
+      applyBlurAt(coords.x, coords.y);
+    }
+  };
+
   const stopDrawing = () => {
-    setIsDrawing(false);
-    const ctx = topCanvasRef.current?.getContext("2d");
-    if (ctx) ctx.beginPath();
+    isDrawingRef.current = false;
+    setIsMouseDown(false);
+    saveCanvasState();
   };
 
-  // 描画処理（スワイプ）
-  const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !topCanvasRef.current) return;
+  const handleMouseDown = (e: React.MouseEvent) =>
+    startDrawing(e.clientX, e.clientY);
+  const handleMouseMove = (e: React.MouseEvent) =>
+    moveDrawing(e.clientX, e.clientY);
 
-    const ctx = topCanvasRef.current.getContext("2d");
-    if (!ctx) return;
-
-    const rect = topCanvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.lineWidth = 40;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, y);
+  // タッチイベント（スマホ用）
+  const handleTouchStart = (e: React.TouchEvent) => {
+    e.preventDefault();
+    if (e.touches.length > 0) {
+      startDrawing(e.touches[0].clientX, e.touches[0].clientY);
+    }
   };
+  const handleTouchMove = (e: React.TouchEvent) => {
+    e.preventDefault();
+    if (e.touches.length > 0) {
+      moveDrawing(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  };
+  const handleTouchEnd = () => stopDrawing();
 
-  // リセット機能
-  const handleReset = () => {
-    if (!imageSrc || !topCanvasRef.current) return;
-
-    const img = new Image();
-    img.src = imageSrc;
-    img.onload = () => {
-      const topCtx = topCanvasRef.current?.getContext("2d");
-      const width = topCanvasRef.current?.width || 0;
-      const height = topCanvasRef.current?.height || 0;
-
-      if (topCtx) {
-        topCtx.globalCompositeOperation = "source-over";
-        topCtx.drawImage(img, 0, 0, width, height);
-      }
-    };
+  const downloadImage = () => {
+    if (!canvasRef.current) return;
+    const link = document.createElement("a");
+    link.download = "blurred-image.png";
+    link.href = canvasRef.current.toDataURL("image/png");
+    link.click();
   };
 
   return (
-    <Container maxWidth="sm" sx={{ py: 4, minHeight: "100vh" }}>
-      <Card elevation={3}>
-        <CardContent>
-          <Typography variant="h5" component="h1" gutterBottom align="center">
-            スワイプでぼかし
+    <Box sx={{ minHeight: "100vh", bgcolor: "background.default", pb: 4 }}>
+      {/* ヘッダー */}
+      <AppBar
+        position="static"
+        elevation={1}
+        sx={{ bgcolor: "background.paper", color: "text.primary" }}
+      >
+        <Toolbar>
+          <Typography
+            variant="h6"
+            component="div"
+            sx={{ flexGrow: 1, display: "flex", alignItems: "center", gap: 1 }}
+          >
+            <BlurOnIcon /> 高画質ぼかしツール
           </Typography>
+          {imageSrc && (
+            <Box>
+              <Tooltip title="元に戻す">
+                <IconButton
+                  color="inherit"
+                  onClick={undoLastAction}
+                  disabled={historyIndex <= 0}
+                >
+                  <UndoIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="やり直す">
+                <IconButton
+                  color="inherit"
+                  onClick={redoLastAction}
+                  disabled={historyIndex >= canvasHistory.length - 1}
+                >
+                  <RedoIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="ダウンロード">
+                <IconButton color="inherit" onClick={downloadImage}>
+                  <DownloadIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          )}
+        </Toolbar>
+      </AppBar>
 
-          {/* 画像アップロードエリア */}
-          {!imageSrc && (
-            <Box
-              sx={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 2,
-                py: 4,
-              }}
-            >
-              <Typography variant="body1" color="text.secondary">
-                画像を選択してください
-              </Typography>
-              <Button
-                variant="contained"
-                component="label"
-                fullWidth
-                sx={{ maxWidth: 300 }}
+      <Container maxWidth="md" sx={{ mt: 4 }}>
+        <Card elevation={3}>
+          <CardContent>
+            {!imageSrc ? (
+              // アップロード画面
+              <Box
+                sx={{
+                  p: 6,
+                  textAlign: "center",
+                  border: 2,
+                  borderColor: "divider",
+                  borderRadius: 2,
+                  borderStyle: "dashed",
+                  cursor: "pointer",
+                  "&:hover": { bgcolor: "action.hover" },
+                }}
+                onClick={() => fileInputRef.current?.click()}
               >
-                画像をアップロード
+                <UploadIcon
+                  sx={{ fontSize: 60, color: "text.secondary", mb: 2 }}
+                />
+                <Typography variant="h5" gutterBottom>
+                  画像をアップロード
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  クリックまたはドラッグ＆ドロップ
+                </Typography>
                 <input
                   type="file"
-                  accept="image/*"
-                  hidden
+                  ref={fileInputRef}
                   onChange={handleImageUpload}
-                />
-              </Button>
-            </Box>
-          )}
-
-          {/* キャンバス表示エリア */}
-          {imageSrc && (
-            <Box sx={{ mt: 2 }}>
-              {/* キャンバスコンテナ（相対配置） */}
-              <Box
-                ref={containerRef}
-                sx={{
-                  position: "relative",
-                  width: "100%",
-                  margin: "0 auto",
-                  // 高さなどは JS で制御するため、ここでは幅のみ制限
-                }}
-              >
-                {/* 下の Canvas (ぼかし画像) */}
-                <StyledCanvas
-                  ref={bottomCanvasRef}
-                  sx={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    zIndex: 1,
-                    pointerEvents: "none", // 下のキャンバスは操作不可
-                  }}
-                />
-
-                {/* 上の Canvas (通常画像・操作用) */}
-                <StyledCanvas
-                  ref={topCanvasRef}
-                  sx={{
-                    position: "relative",
-                    zIndex: 2,
-                    cursor: "crosshair",
-                    width: "100%", // 親に合わせて表示
-                    height: "auto",
-                  }}
-                  onPointerDown={startDrawing}
-                  onPointerMove={draw}
-                  onPointerUp={stopDrawing}
-                  onPointerLeave={stopDrawing}
+                  accept="image/*"
+                  style={{ display: "none" }}
                 />
               </Box>
+            ) : (
+              // 編集画面
+              <Grid container spacing={2}>
+                {/* 設定パネル */}
+                <Grid size={{ xs: 12 }}>
+                  <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                    <Grid container spacing={2} alignItems="center">
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          ぼかし強度：{blurRadius}px
+                        </Typography>
+                        <Slider
+                          value={blurRadius}
+                          onChange={(_, val) => setBlurRadius(val as number)}
+                          min={5}
+                          max={100}
+                          color="primary"
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          ブラシサイズ：{blurSize}px
+                        </Typography>
+                        <Slider
+                          value={blurSize}
+                          onChange={(_, val) => setBlurSize(val as number)}
+                          min={10}
+                          max={300}
+                          color="secondary"
+                        />
+                      </Grid>
+                    </Grid>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        mt: 1,
+                      }}
+                    >
+                      <Typography variant="caption" color="text.secondary">
+                        ズーム：{(zoom * 100).toFixed(0)}% (Ctrl + スクロール)
+                      </Typography>
+                      <Button
+                        size="small"
+                        startIcon={<RefreshIcon />}
+                        onClick={() => setImageSrc(null)}
+                        color="error"
+                      >
+                        画像を変更
+                      </Button>
+                    </Box>
+                  </Paper>
+                </Grid>
 
-              {/* コントロールボタン */}
-              <Stack
-                direction="row"
-                spacing={2}
-                justifyContent="center"
-                sx={{ mt: 3 }}
-              >
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  onClick={handleReset}
-                >
-                  リセット
-                </Button>
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  onClick={() => setImageSrc(null)}
-                >
-                  画像を変更
-                </Button>
-              </Stack>
-
-              <Typography
-                variant="caption"
-                display="block"
-                align="center"
-                sx={{ mt: 2, color: "text.secondary" }}
-              >
-                画像の上を指でなぞると、その部分がぼかされます
-              </Typography>
-            </Box>
-          )}
-        </CardContent>
-      </Card>
-    </Container>
+                {/* キャンバスエリア */}
+                <Grid size={{ xs: 12 }}>
+                  <Box
+                    ref={scrollContainerRef}
+                    sx={{
+                      width: "100%",
+                      maxHeight: "70vh",
+                      overflow: "auto",
+                      bgcolor: "#eee",
+                      border: 1,
+                      borderColor: "divider",
+                      borderRadius: 1,
+                      display: "flex",
+                      justifyContent: "center",
+                      p: 1,
+                    }}
+                  >
+                    <canvas
+                      ref={canvasRef}
+                      onMouseDown={handleMouseDown}
+                      onMouseMove={handleMouseMove}
+                      onMouseUp={stopDrawing}
+                      onMouseLeave={stopDrawing}
+                      onTouchStart={handleTouchStart}
+                      onTouchMove={handleTouchMove}
+                      onTouchEnd={handleTouchEnd}
+                      style={{
+                        width: `${zoom * 100}%`,
+                        height: "auto",
+                        cursor: isMouseDown ? "crosshair" : "crosshair",
+                        touchAction: "none",
+                        userSelect: "none",
+                        boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
+                        backgroundColor: "#fff",
+                      }}
+                    />
+                  </Box>
+                  <Typography
+                    variant="caption"
+                    display="block"
+                    align="center"
+                    sx={{ mt: 1, color: "text.secondary" }}
+                  >
+                    画像上をなぞってぼかしを入れます。スマホではスクロールせずに操作できます。
+                  </Typography>
+                </Grid>
+              </Grid>
+            )}
+          </CardContent>
+        </Card>
+      </Container>
+    </Box>
   );
-}
+};
+
+export default BlurTool;
