@@ -25,7 +25,6 @@ const applyBlurProcessing = (
   height: number,
   radius: number,
 ) => {
-  // 半径が0以下の場合は何もしない
   if (radius < 1) return;
 
   const imageData = ctx.getImageData(0, 0, width, height);
@@ -210,13 +209,17 @@ export default function Home() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  // ★追加: ぼかし処理中かどうか（UIブロック用）
+  // ★追加: ぼかし処理中かどうか
   const [isProcessingBlur, setIsProcessingBlur] = useState(false);
 
   const MAX_CANVAS_SIZE = 1200;
 
   const [brushSize, setBrushSize] = useState(50);
-  // ★変更: ここを「ぼかし半径」として扱います (CSS blur(15px) は Radius 20-30px 相当)
+
+  // ★重要変更: 値を2つに分離
+  // 1. sliderValue: スライダーの見た目の値（即座に変わる）
+  const [sliderValue, setSliderValue] = useState(30);
+  // 2. blurRadius: 実際の計算に使う値（指を離した時だけ変わる）
   const [blurRadius, setBlurRadius] = useState(30);
 
   const [previewPos, setPreviewPos] = useState({ x: 0, y: 0, visible: false });
@@ -245,7 +248,7 @@ export default function Home() {
     reader.readAsDataURL(file);
   };
 
-  // 画像読み込み時 および ぼかし半径変更時の処理
+  // 画像読み込み時 および ぼかし半径(確定値)変更時の処理
   useEffect(() => {
     if (
       !imageSrc ||
@@ -273,13 +276,11 @@ export default function Home() {
         }
       }
 
-      // 初回ロード時のみ imageRef を更新 (スライダー操作時は既存のimgを使う手もあるが、シンプルに再生成)
       imageRef.current = img;
 
       const topCanvas = topCanvasRef.current!;
       const bottomCanvas = bottomCanvasRef.current!;
 
-      // キャンバスサイズが変わる場合のみセット（チラつき防止）
       if (topCanvas.width !== width || topCanvas.height !== height) {
         topCanvas.width = width;
         topCanvas.height = height;
@@ -296,31 +297,25 @@ export default function Home() {
       const bottomCtx = bottomCanvas.getContext("2d");
 
       if (topCtx && bottomCtx) {
-        // ▼ここが重要修正点▼
-
-        // 1. Bottom Canvas（下層）：ここにJSで直接ぼかしを書き込む
-        //    まず元画像を描画
+        // 元画像を描画
         bottomCtx.drawImage(img, 0, 0, width, height);
 
-        //    計算コストがかかるので少し非同期っぽくUIをブロック
+        // 重いぼかし処理を開始
         setIsProcessingBlur(true);
         setTimeout(() => {
           // 下層キャンバスのデータ自体をぼかす
-          // これにより「画面上の見た目」と「データ」が一致する
           applyBlurProcessing(bottomCtx, width, height, blurRadius);
-          setIsProcessingBlur(false);
-        }, 10); // UIレンダリングをブロックしないようsetTimeout
 
-        // 2. Top Canvas（上層）：元画像を鮮明に描画
-        //    ユーザーはここを「消しゴム」で消していく
-        //    再描画時は、既に描いた線が消えてしまわないように注意が必要
-        //    → 今回は簡易実装のため、ぼかし変更時はリセットされる挙動とします
-        //    （線を保持したい場合はレイヤー管理が複雑になるため）
+          // 処理が終わったら操作可能にする
+          setIsProcessingBlur(false);
+        }, 10);
+
+        // トップ（消すレイヤー）の再描画
         topCtx.globalCompositeOperation = "source-over";
         topCtx.drawImage(img, 0, 0, width, height);
       }
     };
-  }, [imageSrc, blurRadius]); // blurRadiusが変わるたびに再計算
+  }, [imageSrc, blurRadius]); // sliderValueではなくblurRadius（確定値）を依存させる
 
   const getCoordinates = (e: React.PointerEvent) => {
     const canvas = topCanvasRef.current;
@@ -344,14 +339,11 @@ export default function Home() {
     if (!ctx) return;
 
     const { x, y } = getCoordinates(e);
-
     const canvas = topCanvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const scale = canvas.width / rect.width;
 
-    // 「上層を消して、下層（ぼけた画像）を見せる」処理
     ctx.globalCompositeOperation = "destination-out";
-    // 完全に透明にする（＝下のぼかしが100%見える）
     ctx.globalAlpha = 1.0;
     ctx.lineWidth = brushSize * scale;
     ctx.lineCap = "round";
@@ -423,16 +415,8 @@ export default function Home() {
         return;
       }
 
-      // ▼ここも重要修正点▼
-      // 以前のように「ここでぼかし計算」はしません。
-      // BottomCanvasは既に画面上で「ぼかされたデータ」を持っているので
-      // それをそのまま描画します。
-
-      // 1. ぼかし背景（BottomCanvas）を描画
       ctx.globalCompositeOperation = "source-over";
       ctx.drawImage(bottomCanvas, 0, 0);
-
-      // 2. 穴あきの上層（TopCanvas）を重ねる
       ctx.drawImage(topCanvas, 0, 0);
 
       const dataUrl = outputCanvas.toDataURL("image/jpeg", 0.95);
@@ -450,7 +434,6 @@ export default function Home() {
     const ctx = topCanvasRef.current.getContext("2d");
     if (!ctx) return;
 
-    // TopCanvasを元画像で塗りつぶし直す（＝穴を塞ぐ）
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 1.0;
     ctx.drawImage(
@@ -507,17 +490,16 @@ export default function Home() {
                   min={20}
                   max={150}
                 />
+
                 <Typography variant="caption">ぼかしの強さ</Typography>
-                {/* 
-                  ユーザーがスライダーを離した時(onChangeCommitted)に更新するなど
-                  パフォーマンス対策も可能ですが、ここではシンプルに実装
-                */}
+                {/* ▼▼▼ 修正箇所 ▼▼▼ */}
                 <Slider
-                  value={blurRadius}
-                  onChange={(_, v) => setBlurRadius(v as number)}
+                  value={sliderValue} // 見た目は sliderValue を使用（即座に反応）
+                  onChange={(_, v) => setSliderValue(v as number)} // 見た目を更新
+                  onChangeCommitted={(_, v) => setBlurRadius(v as number)} // 指を離したら計算用の値を更新
                   min={5}
                   max={50}
-                  disabled={isProcessingBlur}
+                  disabled={isProcessingBlur} // 処理中は無効化されるが、指を離した後なので操作感に影響しない
                 />
               </Paper>
 
@@ -536,12 +518,7 @@ export default function Home() {
                   opacity={previewPos.visible ? 1 : 0}
                 />
 
-                {/* 
-                  ▼変更点: style={{ filter: "blur(...)" }} を削除 
-                  BottomCanvas自体がJSでぼかされたデータを描画するため
-                */}
                 <StyledCanvas ref={bottomCanvasRef} sx={{ zIndex: 1 }} />
-
                 <StyledCanvas
                   ref={topCanvasRef}
                   sx={{ zIndex: 2, touchAction: "none", cursor: "crosshair" }}
