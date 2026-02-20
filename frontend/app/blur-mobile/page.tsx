@@ -321,47 +321,47 @@ export default function Home() {
     return { x: x * scaleX, y: y * scaleY };
   };
 
-  // ★修正機能: タップだけで描画（点）されるように修正
-  // ★修正機能: タップだけで描画（点）し、かつドラッグ継続も滑らかにする
-  const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    setIsDrawing(true);
+const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  e.preventDefault();
 
-    if (!topCanvasRef.current) return;
-    const ctx = topCanvasRef.current.getContext("2d");
-    if (!ctx) return;
+  // ★追加: タッチ操作の補足（指が少しずれても追従するようにする）
+  e.currentTarget.setPointerCapture(e.pointerId);
 
-    const { x, y } = getCoordinates(e);
+  setIsDrawing(true);
 
-    // 描画設定
-    const canvas = topCanvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const scale = canvas.width / rect.width;
+  if (!topCanvasRef.current) return;
+  const ctx = topCanvasRef.current.getContext("2d");
+  if (!ctx) return;
 
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.globalAlpha = blurStrength;
-    ctx.lineWidth = brushSize * scale;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+  const { x, y } = getCoordinates(e);
 
-    // ------------------------------------------------
-    // 1. タップした瞬間に「点」を描画する
-    // ------------------------------------------------
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x, y); // 移動せずに線を引く＝点（円）になる
-    ctx.stroke();
+  const canvas = topCanvasRef.current;
+  const rect = canvas.getBoundingClientRect();
+  const scale = canvas.width / rect.width;
 
-    // ------------------------------------------------
-    // 2. そのままドラッグした時のためにパスをリセットして開始点をセット
-    // ------------------------------------------------
-    // これがないと、タップ後にドラッグした際、最初の線が途切れることがあります
-    ctx.beginPath();
-    ctx.moveTo(x, y);
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.globalAlpha = blurStrength;
+  ctx.lineWidth = brushSize * scale;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
 
-    // 描画中はプレビューを隠す
-    setPreviewPos((prev) => ({ ...prev, visible: false }));
-  };
+  // ------------------------------------------------
+  // ★修正: タップ（点）の描画を「線」から「円の塗りつぶし」に変更
+  // スマホでは長さ0の stroke() が無視されることがあるため
+  // ------------------------------------------------
+  ctx.beginPath();
+  // ブラシサイズは直径なので、半径は / 2 します
+  ctx.arc(x, y, (brushSize * scale) / 2, 0, Math.PI * 2);
+  ctx.fill(); // stroke() ではなく fill() で確実に塗りつぶす
+
+  // ------------------------------------------------
+  // ドラッグ継続用のパス設定（ここからは線としてつなぐ）
+  // ------------------------------------------------
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+
+  setPreviewPos((prev) => ({ ...prev, visible: false }));
+};
 
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
