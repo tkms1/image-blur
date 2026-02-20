@@ -322,6 +322,7 @@ export default function Home() {
   };
 
   // ★修正機能: タップだけで描画（点）されるように修正
+  // ★修正機能: タップだけで描画（点）し、かつドラッグ継続も滑らかにする
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     setIsDrawing(true);
@@ -343,11 +344,20 @@ export default function Home() {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    // 点を描画（パスを開始してすぐに閉じることで円を描画）
+    // ------------------------------------------------
+    // 1. タップした瞬間に「点」を描画する
+    // ------------------------------------------------
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x, y); // 移動せずに線を引く＝点（円）になる
     ctx.stroke();
+
+    // ------------------------------------------------
+    // 2. そのままドラッグした時のためにパスをリセットして開始点をセット
+    // ------------------------------------------------
+    // これがないと、タップ後にドラッグした際、最初の線が途切れることがあります
+    ctx.beginPath();
+    ctx.moveTo(x, y);
 
     // 描画中はプレビューを隠す
     setPreviewPos((prev) => ({ ...prev, visible: false }));
