@@ -17,28 +17,24 @@ import { styled } from "@mui/material/styles";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 
 // -----------------------------------------------------------------------------
-// ▼ ぼかし処理アルゴリズム (元のコードと同じBox Blur)
+// ▼ ぼかし処理アルゴリズム
+// ImageDataを直接書き換えるように少し調整
 // -----------------------------------------------------------------------------
-const applyBlurProcessing = (
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  radius: number,
-) => {
+const applyBlurToImageData = (imageData: ImageData, radius: number) => {
   if (radius < 1) return;
 
-  const imageData = ctx.getImageData(0, 0, width, height);
+  const width = imageData.width;
+  const height = imageData.height;
   const pixels = imageData.data;
 
-  const iterations = 3;
+  // 処理速度と品質のバランスのためイテレーションは2回程度に
+  const iterations = 2;
   const r = Math.floor(radius / 2);
 
   for (let i = 0; i < iterations; i++) {
     boxBlurH(pixels, width, height, r);
     boxBlurT(pixels, width, height, r);
   }
-
-  ctx.putImageData(imageData, 0, 0);
 };
 
 const boxBlurH = (
@@ -156,7 +152,6 @@ const boxBlurT = (
 };
 // -----------------------------------------------------------------------------
 
-// スタイル定義
 const CanvasContainer = styled("div")({
   position: "relative",
   width: "100%",
@@ -209,26 +204,21 @@ export default function Home() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  // ★追加: ぼかし処理中かどうか
-  const [isProcessingBlur, setIsProcessingBlur] = useState(false);
 
   const MAX_CANVAS_SIZE = 1200;
 
   const [brushSize, setBrushSize] = useState(50);
-
-  // ★重要変更: 値を2つに分離
-  // 1. sliderValue: スライダーの見た目の値（即座に変わる）
-  const [sliderValue, setSliderValue] = useState(30);
-  // 2. blurRadius: 実際の計算に使う値（指を離した時だけ変わる）
-  const [blurRadius, setBlurRadius] = useState(30);
+  const [blurRadius, setBlurRadius] = useState(15); // デフォルト値を少し下げておくと重ね塗りがしやすい
 
   const [previewPos, setPreviewPos] = useState({ x: 0, y: 0, visible: false });
   const [containerHeight, setContainerHeight] = useState<number | "auto">(
     "auto",
   );
 
-  const topCanvasRef = useRef<HTMLCanvasElement>(null);
-  const bottomCanvasRef = useRef<HTMLCanvasElement>(null);
+  const mainCanvasRef = useRef<HTMLCanvasElement>(null);
+  // 一時的な描画作業用のキャンバス（画面には出さない）
+  const tempCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const previewTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -248,15 +238,11 @@ export default function Home() {
     reader.readAsDataURL(file);
   };
 
-  // 画像読み込み時 および ぼかし半径(確定値)変更時の処理
+  // --------------------------------------------------------------------------
+  // ▼ 画像読み込み時の初期化
+  // --------------------------------------------------------------------------
   useEffect(() => {
-    if (
-      !imageSrc ||
-      !topCanvasRef.current ||
-      !bottomCanvasRef.current ||
-      !containerRef.current
-    )
-      return;
+    if (!imageSrc || !mainCanvasRef.current || !containerRef.current) return;
 
     const img = new Image();
     img.src = imageSrc;
@@ -278,47 +264,38 @@ export default function Home() {
 
       imageRef.current = img;
 
-      const topCanvas = topCanvasRef.current!;
-      const bottomCanvas = bottomCanvasRef.current!;
+      // 1. メインキャンバスのセットアップ
+      const mainCanvas = mainCanvasRef.current!;
+      mainCanvas.width = width;
+      mainCanvas.height = height;
 
-      if (topCanvas.width !== width || topCanvas.height !== height) {
-        topCanvas.width = width;
-        topCanvas.height = height;
-        bottomCanvas.width = width;
-        bottomCanvas.height = height;
+      // 2. 作業用Tempキャンバスのセットアップ（ブラシサイズ程度の小ささでもいいが、管理を楽にするため同じサイズに）
+      if (!tempCanvasRef.current) {
+        tempCanvasRef.current = document.createElement("canvas");
       }
+      tempCanvasRef.current.width = width;
+      tempCanvasRef.current.height = height;
 
+      // コンテナ高さの調整
       const containerWidth = containerRef.current!.clientWidth;
       const scale = containerWidth / width;
-      const displayHeight = height * scale;
-      setContainerHeight(displayHeight);
+      setContainerHeight(height * scale);
 
-      const topCtx = topCanvas.getContext("2d");
-      const bottomCtx = bottomCanvas.getContext("2d");
+      const mainCtx = mainCanvas.getContext("2d");
 
-      if (topCtx && bottomCtx) {
-        // 元画像を描画
-        bottomCtx.drawImage(img, 0, 0, width, height);
-
-        // 重いぼかし処理を開始
-        setIsProcessingBlur(true);
-        setTimeout(() => {
-          // 下層キャンバスのデータ自体をぼかす
-          applyBlurProcessing(bottomCtx, width, height, blurRadius);
-
-          // 処理が終わったら操作可能にする
-          setIsProcessingBlur(false);
-        }, 10);
-
-        // トップ（消すレイヤー）の再描画
-        topCtx.globalCompositeOperation = "source-over";
-        topCtx.drawImage(img, 0, 0, width, height);
+      // 最初は元画像を描画
+      if (mainCtx) {
+        mainCtx.drawImage(img, 0, 0, width, height);
       }
     };
-  }, [imageSrc, blurRadius]); // sliderValueではなくblurRadius（確定値）を依存させる
+  }, [imageSrc]);
+
+  // --------------------------------------------------------------------------
+  // ▼ 描画ロジック（現在地をぼかして上書きする方式）
+  // --------------------------------------------------------------------------
 
   const getCoordinates = (e: React.PointerEvent) => {
-    const canvas = topCanvasRef.current;
+    const canvas = mainCanvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -328,56 +305,80 @@ export default function Home() {
     return { x: x * scaleX, y: y * scaleY };
   };
 
+  const paintBlur = (x: number, y: number) => {
+    if (!mainCanvasRef.current || !tempCanvasRef.current) return;
+
+    const mainCtx = mainCanvasRef.current.getContext("2d");
+    const tempCtx = tempCanvasRef.current.getContext("2d");
+    if (!mainCtx || !tempCtx) return;
+
+    const canvas = mainCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scale = canvas.width / rect.width;
+
+    // ブラシの半径
+    const r = (brushSize * scale) / 2;
+    // 処理範囲（ブラシ位置を中心とした正方形）
+    const size = Math.ceil(r * 2);
+    // 描画開始位置（整数座標に丸める）
+    const startX = Math.floor(x - r);
+    const startY = Math.floor(y - r);
+
+    // 1. 現在のメインキャンバスから、ブラシ範囲の画像データを取得する
+    // ※ ここで「現在の見た目（既にぼけているかもしれない）」を取得するのがポイント
+    // ※ 画面外にはみ出るとエラーになる場合があるのでtry-catchまたは境界チェックが望ましいが、
+    //    getImageDataは範囲外を透明ピクセルとして返してくれるため通常は動く
+    const currentImageData = mainCtx.getImageData(startX, startY, size, size);
+
+    // 2. 取得したデータに対して、さらにぼかし計算を行う (1+1=2)
+    applyBlurToImageData(currentImageData, blurRadius);
+
+    // 3. ぼかしたデータを一時キャンバスに配置
+    //    (一時キャンバス全体をクリアしてから、必要な部分だけputする)
+    tempCtx.clearRect(
+      0,
+      0,
+      tempCanvasRef.current.width,
+      tempCanvasRef.current.height,
+    );
+    tempCtx.putImageData(currentImageData, startX, startY);
+
+    // 4. メインキャンバスに円形で書き戻す
+    mainCtx.save();
+    mainCtx.beginPath();
+    mainCtx.arc(x, y, r, 0, Math.PI * 2);
+    mainCtx.clip(); // 円形に切り抜く
+
+    // 一時キャンバスの内容をメインキャンバスに合成
+    // これにより、四角いImageDataを円形でペーストしたことになる
+    mainCtx.drawImage(tempCanvasRef.current, 0, 0);
+
+    mainCtx.restore();
+  };
+
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
 
     setIsDrawing(true);
-
-    if (!topCanvasRef.current) return;
-    const ctx = topCanvasRef.current.getContext("2d");
-    if (!ctx) return;
-
     const { x, y } = getCoordinates(e);
-    const canvas = topCanvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const scale = canvas.width / rect.width;
-
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.globalAlpha = 1.0;
-    ctx.lineWidth = brushSize * scale;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    ctx.beginPath();
-    ctx.arc(x, y, (brushSize * scale) / 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-
+    paintBlur(x, y);
     setPreviewPos((prev) => ({ ...prev, visible: false }));
   };
 
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    if (!isDrawing || !topCanvasRef.current) return;
-    const ctx = topCanvasRef.current.getContext("2d");
-    if (!ctx) return;
+    if (!isDrawing) return;
     const { x, y } = getCoordinates(e);
 
-    ctx.lineTo(x, y);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(x, y);
+    // パフォーマンス対策: ドラッグ中は計算負荷が高いため、
+    // requestAnimationFrame等で制御するのが理想ですが、
+    // シンプル実装のためそのまま呼び出します。重い場合はイテレーションやサイズを調整してください。
+    paintBlur(x, y);
   };
 
   const stopDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    if (!isDrawing) return;
-    const ctx = topCanvasRef.current?.getContext("2d");
-    if (ctx) ctx.beginPath();
     setIsDrawing(false);
   };
 
@@ -394,54 +395,30 @@ export default function Home() {
   };
 
   const handleDownload = () => {
-    if (!topCanvasRef.current || !bottomCanvasRef.current || !imageRef.current)
-      return;
+    if (!mainCanvasRef.current) return;
 
     setIsSaving(true);
-
     setTimeout(() => {
-      const topCanvas = topCanvasRef.current!;
-      const bottomCanvas = bottomCanvasRef.current!;
-      const width = topCanvas.width;
-      const height = topCanvas.height;
-
-      const outputCanvas = document.createElement("canvas");
-      outputCanvas.width = width;
-      outputCanvas.height = height;
-      const ctx = outputCanvas.getContext("2d");
-
-      if (!ctx) {
-        setIsSaving(false);
-        return;
-      }
-
-      ctx.globalCompositeOperation = "source-over";
-      ctx.drawImage(bottomCanvas, 0, 0);
-      ctx.drawImage(topCanvas, 0, 0);
-
-      const dataUrl = outputCanvas.toDataURL("image/jpeg", 0.95);
+      const dataUrl = mainCanvasRef.current!.toDataURL("image/jpeg", 0.95);
       const link = document.createElement("a");
       link.download = "blur-edited.jpg";
       link.href = dataUrl;
       link.click();
-
       setIsSaving(false);
     }, 100);
   };
 
   const handleReset = () => {
-    if (!topCanvasRef.current || !imageRef.current) return;
-    const ctx = topCanvasRef.current.getContext("2d");
+    if (!mainCanvasRef.current || !imageRef.current) return;
+    const ctx = mainCanvasRef.current.getContext("2d");
     if (!ctx) return;
 
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 1.0;
     ctx.drawImage(
       imageRef.current,
       0,
       0,
-      topCanvasRef.current.width,
-      topCanvasRef.current.height,
+      mainCanvasRef.current.width,
+      mainCanvasRef.current.height,
     );
   };
 
@@ -450,7 +427,7 @@ export default function Home() {
       <Card elevation={3}>
         <CardContent>
           <Typography variant="h6" align="center" gutterBottom>
-            高画質ぼかし加工
+            高画質ぼかし加工（重ね塗り対応）
           </Typography>
 
           {!imageSrc && (
@@ -491,15 +468,22 @@ export default function Home() {
                   max={150}
                 />
 
-                <Typography variant="caption">ぼかしの強さ</Typography>
-                {/* ▼▼▼ 修正箇所 ▼▼▼ */}
+                <Typography variant="caption">追加するぼかしの強さ</Typography>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    display: "block",
+                    color: "text.secondary",
+                    fontSize: "0.7rem",
+                  }}
+                >
+                  ※何度もなぞると強くなります
+                </Typography>
                 <Slider
-                  value={sliderValue} // 見た目は sliderValue を使用（即座に反応）
-                  onChange={(_, v) => setSliderValue(v as number)} // 見た目を更新
-                  onChangeCommitted={(_, v) => setBlurRadius(v as number)} // 指を離したら計算用の値を更新
+                  value={blurRadius}
+                  onChange={(_, v) => setBlurRadius(v as number)}
                   min={5}
                   max={50}
-                  disabled={isProcessingBlur} // 処理中は無効化されるが、指を離した後なので操作感に影響しない
                 />
               </Paper>
 
@@ -518,10 +502,9 @@ export default function Home() {
                   opacity={previewPos.visible ? 1 : 0}
                 />
 
-                <StyledCanvas ref={bottomCanvasRef} sx={{ zIndex: 1 }} />
                 <StyledCanvas
-                  ref={topCanvasRef}
-                  sx={{ zIndex: 2, touchAction: "none", cursor: "crosshair" }}
+                  ref={mainCanvasRef}
+                  sx={{ touchAction: "none", cursor: "crosshair" }}
                   onPointerDown={startDrawing}
                   onPointerMove={draw}
                   onPointerUp={stopDrawing}
@@ -536,14 +519,14 @@ export default function Home() {
                 sx={{ mt: 3 }}
               >
                 <Button variant="outlined" onClick={handleReset}>
-                  元に戻す
+                  すべてリセット
                 </Button>
                 <Button
                   variant="contained"
                   color="primary"
                   startIcon={<FileDownloadIcon />}
                   onClick={handleDownload}
-                  disabled={isSaving || isProcessingBlur}
+                  disabled={isSaving}
                 >
                   {isSaving ? "処理中..." : "保存"}
                 </Button>
@@ -556,7 +539,7 @@ export default function Home() {
         </CardContent>
       </Card>
 
-      {(isLoading || isSaving || isProcessingBlur) && (
+      {(isLoading || isSaving) && (
         <Box
           sx={{
             position: "fixed",
@@ -574,11 +557,7 @@ export default function Home() {
           <Stack alignItems="center" spacing={2}>
             <CircularProgress />
             <Typography variant="body2">
-              {isProcessingBlur
-                ? "ぼかし処理中..."
-                : isSaving
-                  ? "画像を保存中..."
-                  : "読み込み中..."}
+              {isSaving ? "画像を保存中..." : "読み込み中..."}
             </Typography>
           </Stack>
         </Box>
