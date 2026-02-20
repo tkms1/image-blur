@@ -16,6 +16,147 @@ import {
 import { styled } from "@mui/material/styles";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 
+// -----------------------------------------------------------------------------
+// ▼ ぼかし処理アルゴリズム (元のコードと同じBox Blur)
+// -----------------------------------------------------------------------------
+const applyBlurProcessing = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  radius: number,
+) => {
+  // 半径が0以下の場合は何もしない
+  if (radius < 1) return;
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const pixels = imageData.data;
+
+  const iterations = 3;
+  const r = Math.floor(radius / 2);
+
+  for (let i = 0; i < iterations; i++) {
+    boxBlurH(pixels, width, height, r);
+    boxBlurT(pixels, width, height, r);
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+};
+
+const boxBlurH = (
+  pixels: Uint8ClampedArray,
+  w: number,
+  h: number,
+  r: number,
+) => {
+  const iarr = 1 / (r + r + 1);
+  for (let i = 0; i < h; i++) {
+    let ti = i * w,
+      li = ti,
+      ri = ti + r;
+    const fv = pixels[ti * 4],
+      fv1 = pixels[ti * 4 + 1],
+      fv2 = pixels[ti * 4 + 2];
+    const lv = pixels[(ti + w - 1) * 4],
+      lv1 = pixels[(ti + w - 1) * 4 + 1],
+      lv2 = pixels[(ti + w - 1) * 4 + 2];
+    let val_r = (r + 1) * fv,
+      val_g = (r + 1) * fv1,
+      val_b = (r + 1) * fv2;
+    for (let j = 0; j < r; j++) {
+      val_r += pixels[(ti + j) * 4];
+      val_g += pixels[(ti + j) * 4 + 1];
+      val_b += pixels[(ti + j) * 4 + 2];
+    }
+    for (let j = 0; j <= r; j++) {
+      val_r += pixels[ri++ * 4] - fv;
+      val_g += pixels[(ri - 1) * 4 + 1] - fv1;
+      val_b += pixels[(ri - 1) * 4 + 2] - fv2;
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      ti++;
+    }
+    for (let j = r + 1; j < w - r; j++) {
+      val_r += pixels[ri++ * 4] - pixels[li++ * 4];
+      val_g += pixels[(ri - 1) * 4 + 1] - pixels[(li - 1) * 4 + 1];
+      val_b += pixels[(ri - 1) * 4 + 2] - pixels[(li - 1) * 4 + 2];
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      ti++;
+    }
+    for (let j = w - r; j < w; j++) {
+      val_r += lv - pixels[li++ * 4];
+      val_g += lv1 - pixels[(li - 1) * 4 + 1];
+      val_b += lv2 - pixels[(li - 1) * 4 + 2];
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      ti++;
+    }
+  }
+};
+
+const boxBlurT = (
+  pixels: Uint8ClampedArray,
+  w: number,
+  h: number,
+  r: number,
+) => {
+  const iarr = 1 / (r + r + 1);
+  for (let i = 0; i < w; i++) {
+    let ti = i,
+      li = ti,
+      ri = ti + r * w;
+    const fv = pixels[ti * 4],
+      fv1 = pixels[ti * 4 + 1],
+      fv2 = pixels[ti * 4 + 2];
+    const lv = pixels[(ti + w * (h - 1)) * 4],
+      lv1 = pixels[(ti + w * (h - 1)) * 4 + 1],
+      lv2 = pixels[(ti + w * (h - 1)) * 4 + 2];
+    let val_r = (r + 1) * fv,
+      val_g = (r + 1) * fv1,
+      val_b = (r + 1) * fv2;
+    for (let j = 0; j < r; j++) {
+      val_r += pixels[(ti + j * w) * 4];
+      val_g += pixels[(ti + j * w) * 4 + 1];
+      val_b += pixels[(ti + j * w) * 4 + 2];
+    }
+    for (let j = 0; j <= r; j++) {
+      val_r += pixels[ri * 4] - fv;
+      val_g += pixels[ri * 4 + 1] - fv1;
+      val_b += pixels[ri * 4 + 2] - fv2;
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      ri += w;
+      ti += w;
+    }
+    for (let j = r + 1; j < h - r; j++) {
+      val_r += pixels[ri * 4] - pixels[li * 4];
+      val_g += pixels[ri * 4 + 1] - pixels[li * 4 + 1];
+      val_b += pixels[ri * 4 + 2] - pixels[li * 4 + 2];
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      li += w;
+      ri += w;
+      ti += w;
+    }
+    for (let j = h - r; j < h; j++) {
+      val_r += lv - pixels[li * 4];
+      val_g += lv1 - pixels[li * 4 + 1];
+      val_b += lv2 - pixels[li * 4 + 2];
+      pixels[ti * 4] = Math.round(val_r * iarr);
+      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
+      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
+      li += w;
+      ti += w;
+    }
+  }
+};
+// -----------------------------------------------------------------------------
+
 // スタイル定義
 const CanvasContainer = styled("div")({
   position: "relative",
@@ -69,13 +210,15 @@ export default function Home() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // ★追加: ぼかし処理中かどうか（UIブロック用）
+  const [isProcessingBlur, setIsProcessingBlur] = useState(false);
 
   const MAX_CANVAS_SIZE = 1200;
-  // ★重要: CSSのblur(15px)と同等の見た目にするため、高解像度画像用には大きめの値を設定
-  const [blurRadius, setBlurRadius] = useState(30);
 
   const [brushSize, setBrushSize] = useState(50);
-  const [eraserOpacity, setEraserOpacity] = useState(1.0); // 変数名を分かりやすく変更（機能は同じ）
+  // ★変更: ここを「ぼかし半径」として扱います (CSS blur(15px) は Radius 20-30px 相当)
+  const [blurRadius, setBlurRadius] = useState(30);
+
   const [previewPos, setPreviewPos] = useState({ x: 0, y: 0, visible: false });
   const [containerHeight, setContainerHeight] = useState<number | "auto">(
     "auto",
@@ -102,9 +245,7 @@ export default function Home() {
     reader.readAsDataURL(file);
   };
 
-  // -----------------------------------------------------------
-  // 画像読み込みと初期描画（ここを修正）
-  // -----------------------------------------------------------
+  // 画像読み込み時 および ぼかし半径変更時の処理
   useEffect(() => {
     if (
       !imageSrc ||
@@ -120,7 +261,6 @@ export default function Home() {
       let width = img.width;
       let height = img.height;
 
-      // リサイズ処理
       if (width > height) {
         if (width > MAX_CANVAS_SIZE) {
           height = Math.round(height * (MAX_CANVAS_SIZE / width));
@@ -133,16 +273,20 @@ export default function Home() {
         }
       }
 
+      // 初回ロード時のみ imageRef を更新 (スライダー操作時は既存のimgを使う手もあるが、シンプルに再生成)
       imageRef.current = img;
 
       const topCanvas = topCanvasRef.current!;
       const bottomCanvas = bottomCanvasRef.current!;
-      topCanvas.width = width;
-      topCanvas.height = height;
-      bottomCanvas.width = width;
-      bottomCanvas.height = height;
 
-      // 表示サイズ調整
+      // キャンバスサイズが変わる場合のみセット（チラつき防止）
+      if (topCanvas.width !== width || topCanvas.height !== height) {
+        topCanvas.width = width;
+        topCanvas.height = height;
+        bottomCanvas.width = width;
+        bottomCanvas.height = height;
+      }
+
       const containerWidth = containerRef.current!.clientWidth;
       const scale = containerWidth / width;
       const displayHeight = height * scale;
@@ -152,38 +296,31 @@ export default function Home() {
       const bottomCtx = bottomCanvas.getContext("2d");
 
       if (topCtx && bottomCtx) {
-        // ▼▼ 修正ポイント ▼▼
-        // CSSフィルターではなく、Canvas自体にぼかしを描画します。
-        // これにより「見えている画像」と「保存される画像」のデータが一致します。
+        // ▼ここが重要修正点▼
 
-        // 1. ボトム（ぼかし背景）の描画
-        bottomCtx.save();
-        bottomCtx.filter = `blur(${blurRadius}px)`; // 標準機能で高速・高品質なぼかし
-        // 余白が出ないよう少し拡大して描画するか、端の処理が必要ですが、
-        // 簡易的にそのまま描画します（端が少し薄くなる場合があります）
+        // 1. Bottom Canvas（下層）：ここにJSで直接ぼかしを書き込む
+        //    まず元画像を描画
         bottomCtx.drawImage(img, 0, 0, width, height);
-        bottomCtx.restore();
 
-        // ※CSSのfilterは削除または無効化
-        bottomCanvas.style.filter = "none";
+        //    計算コストがかかるので少し非同期っぽくUIをブロック
+        setIsProcessingBlur(true);
+        setTimeout(() => {
+          // 下層キャンバスのデータ自体をぼかす
+          // これにより「画面上の見た目」と「データ」が一致する
+          applyBlurProcessing(bottomCtx, width, height, blurRadius);
+          setIsProcessingBlur(false);
+        }, 10); // UIレンダリングをブロックしないようsetTimeout
 
-        // 2. トップ（元画像）の描画
+        // 2. Top Canvas（上層）：元画像を鮮明に描画
+        //    ユーザーはここを「消しゴム」で消していく
+        //    再描画時は、既に描いた線が消えてしまわないように注意が必要
+        //    → 今回は簡易実装のため、ぼかし変更時はリセットされる挙動とします
+        //    （線を保持したい場合はレイヤー管理が複雑になるため）
         topCtx.globalCompositeOperation = "source-over";
         topCtx.drawImage(img, 0, 0, width, height);
       }
     };
-  }, [imageSrc, blurRadius]); // blurRadiusが変わったら再描画
-
-  // ブラシプレビュー表示
-  useEffect(() => {
-    if (!containerRef.current || !imageSrc) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    setPreviewPos({ x: rect.width / 2, y: rect.height / 2, visible: true });
-    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-    previewTimerRef.current = setTimeout(() => {
-      setPreviewPos((prev) => ({ ...prev, visible: false }));
-    }, 1500);
-  }, [brushSize, imageSrc]);
+  }, [imageSrc, blurRadius]); // blurRadiusが変わるたびに再計算
 
   const getCoordinates = (e: React.PointerEvent) => {
     const canvas = topCanvasRef.current;
@@ -199,6 +336,7 @@ export default function Home() {
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
+
     setIsDrawing(true);
 
     if (!topCanvasRef.current) return;
@@ -206,13 +344,15 @@ export default function Home() {
     if (!ctx) return;
 
     const { x, y } = getCoordinates(e);
+
     const canvas = topCanvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const scale = canvas.width / rect.width;
 
-    // 「消しゴム」として機能させ、下のぼかしレイヤーを見せる
+    // 「上層を消して、下層（ぼけた画像）を見せる」処理
     ctx.globalCompositeOperation = "destination-out";
-    ctx.globalAlpha = eraserOpacity;
+    // 完全に透明にする（＝下のぼかしが100%見える）
+    ctx.globalAlpha = 1.0;
     ctx.lineWidth = brushSize * scale;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -243,9 +383,10 @@ export default function Home() {
 
   const stopDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    setIsDrawing(false);
+    if (!isDrawing) return;
     const ctx = topCanvasRef.current?.getContext("2d");
     if (ctx) ctx.beginPath();
+    setIsDrawing(false);
   };
 
   const handleContainerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -260,16 +401,12 @@ export default function Home() {
     }, 1500);
   };
 
-  // -----------------------------------------------------------
-  // ダウンロード処理（ここを修正）
-  // -----------------------------------------------------------
   const handleDownload = () => {
     if (!topCanvasRef.current || !bottomCanvasRef.current || !imageRef.current)
       return;
 
     setIsSaving(true);
 
-    // 少し待ってUIの反応を確保
     setTimeout(() => {
       const topCanvas = topCanvasRef.current!;
       const bottomCanvas = bottomCanvasRef.current!;
@@ -286,14 +423,16 @@ export default function Home() {
         return;
       }
 
-      // ▼▼ 修正ポイント ▼▼
-      // 再度ぼかし計算をする必要はありません。
-      // プレビューで見えている「既にぼやけたbottomCanvas」をそのまま使います。
+      // ▼ここも重要修正点▼
+      // 以前のように「ここでぼかし計算」はしません。
+      // BottomCanvasは既に画面上で「ぼかされたデータ」を持っているので
+      // それをそのまま描画します。
 
-      // 1. ぼかし済みの背景を描画
+      // 1. ぼかし背景（BottomCanvas）を描画
+      ctx.globalCompositeOperation = "source-over";
       ctx.drawImage(bottomCanvas, 0, 0);
 
-      // 2. 穴あき加工された上のレイヤー（元画像）を重ねる
+      // 2. 穴あきの上層（TopCanvas）を重ねる
       ctx.drawImage(topCanvas, 0, 0);
 
       const dataUrl = outputCanvas.toDataURL("image/jpeg", 0.95);
@@ -311,9 +450,9 @@ export default function Home() {
     const ctx = topCanvasRef.current.getContext("2d");
     if (!ctx) return;
 
-    // トップキャンバス（鮮明な画像）をリセットして穴を埋める
+    // TopCanvasを元画像で塗りつぶし直す（＝穴を塞ぐ）
     ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 1.0; // reset alpha
+    ctx.globalAlpha = 1.0;
     ctx.drawImage(
       imageRef.current,
       0,
@@ -368,27 +507,17 @@ export default function Home() {
                   min={20}
                   max={150}
                 />
-
+                <Typography variant="caption">ぼかしの強さ</Typography>
                 {/* 
-                  以前の「ぼかし濃度」は globalAlpha（透かし具合）でしたが、
-                  ユーザーの意図が「背景のぼけ具合」であればこちらを推奨します。
-                  両方実装しても良いですが、ここでは「背景のぼかし強度」スライダーを追加しています。
+                  ユーザーがスライダーを離した時(onChangeCommitted)に更新するなど
+                  パフォーマンス対策も可能ですが、ここではシンプルに実装
                 */}
-                <Typography variant="caption">ぼかし強度（背景）</Typography>
                 <Slider
                   value={blurRadius}
                   onChange={(_, v) => setBlurRadius(v as number)}
                   min={5}
-                  max={50} // 30-50くらいがCSSのblur(15px)に近い見た目になります
-                />
-
-                <Typography variant="caption">修正強度（透明度）</Typography>
-                <Slider
-                  value={eraserOpacity}
-                  onChange={(_, v) => setEraserOpacity(v as number)}
-                  min={0.1}
-                  max={1.0}
-                  step={0.1}
+                  max={50}
+                  disabled={isProcessingBlur}
                 />
               </Paper>
 
@@ -406,7 +535,13 @@ export default function Home() {
                   y={previewPos.y}
                   opacity={previewPos.visible ? 1 : 0}
                 />
+
+                {/* 
+                  ▼変更点: style={{ filter: "blur(...)" }} を削除 
+                  BottomCanvas自体がJSでぼかされたデータを描画するため
+                */}
                 <StyledCanvas ref={bottomCanvasRef} sx={{ zIndex: 1 }} />
+
                 <StyledCanvas
                   ref={topCanvasRef}
                   sx={{ zIndex: 2, touchAction: "none", cursor: "crosshair" }}
@@ -431,7 +566,7 @@ export default function Home() {
                   color="primary"
                   startIcon={<FileDownloadIcon />}
                   onClick={handleDownload}
-                  disabled={isSaving}
+                  disabled={isSaving || isProcessingBlur}
                 >
                   {isSaving ? "処理中..." : "保存"}
                 </Button>
@@ -444,7 +579,7 @@ export default function Home() {
         </CardContent>
       </Card>
 
-      {(isLoading || isSaving) && (
+      {(isLoading || isSaving || isProcessingBlur) && (
         <Box
           sx={{
             position: "fixed",
@@ -461,9 +596,13 @@ export default function Home() {
         >
           <Stack alignItems="center" spacing={2}>
             <CircularProgress />
-            {isSaving && (
-              <Typography variant="body2">高画質保存中...</Typography>
-            )}
+            <Typography variant="body2">
+              {isProcessingBlur
+                ? "ぼかし処理中..."
+                : isSaving
+                  ? "画像を保存中..."
+                  : "読み込み中..."}
+            </Typography>
           </Stack>
         </Box>
       )}
