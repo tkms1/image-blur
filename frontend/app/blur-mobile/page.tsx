@@ -16,146 +16,6 @@ import {
 import { styled } from "@mui/material/styles";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 
-// -----------------------------------------------------------------------------
-// ▼ ぼかし処理アルゴリズム (Box Blur近似によるガウスぼかし)
-// スマホでも確実に滑らかなぼかしを作るための計算ロジック
-// -----------------------------------------------------------------------------
-const applyBlurProcessing = (
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  radius: number,
-) => {
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const pixels = imageData.data;
-
-  const iterations = 3;
-  const r = Math.floor(radius / 2);
-
-  for (let i = 0; i < iterations; i++) {
-    boxBlurH(pixels, width, height, r);
-    boxBlurT(pixels, width, height, r);
-  }
-
-  ctx.putImageData(imageData, 0, 0);
-};
-
-const boxBlurH = (
-  pixels: Uint8ClampedArray,
-  w: number,
-  h: number,
-  r: number,
-) => {
-  const iarr = 1 / (r + r + 1);
-  for (let i = 0; i < h; i++) {
-    let ti = i * w,
-      li = ti,
-      ri = ti + r;
-    const fv = pixels[ti * 4],
-      fv1 = pixels[ti * 4 + 1],
-      fv2 = pixels[ti * 4 + 2];
-    const lv = pixels[(ti + w - 1) * 4],
-      lv1 = pixels[(ti + w - 1) * 4 + 1],
-      lv2 = pixels[(ti + w - 1) * 4 + 2];
-    let val_r = (r + 1) * fv,
-      val_g = (r + 1) * fv1,
-      val_b = (r + 1) * fv2;
-
-    for (let j = 0; j < r; j++) {
-      val_r += pixels[(ti + j) * 4];
-      val_g += pixels[(ti + j) * 4 + 1];
-      val_b += pixels[(ti + j) * 4 + 2];
-    }
-    for (let j = 0; j <= r; j++) {
-      val_r += pixels[ri++ * 4] - fv;
-      val_g += pixels[(ri - 1) * 4 + 1] - fv1;
-      val_b += pixels[(ri - 1) * 4 + 2] - fv2;
-      pixels[ti * 4] = Math.round(val_r * iarr);
-      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
-      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
-      ti++;
-    }
-    for (let j = r + 1; j < w - r; j++) {
-      val_r += pixels[ri++ * 4] - pixels[li++ * 4];
-      val_g += pixels[(ri - 1) * 4 + 1] - pixels[(li - 1) * 4 + 1];
-      val_b += pixels[(ri - 1) * 4 + 2] - pixels[(li - 1) * 4 + 2];
-      pixels[ti * 4] = Math.round(val_r * iarr);
-      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
-      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
-      ti++;
-    }
-    for (let j = w - r; j < w; j++) {
-      val_r += lv - pixels[li++ * 4];
-      val_g += lv1 - pixels[(li - 1) * 4 + 1];
-      val_b += lv2 - pixels[(li - 1) * 4 + 2];
-      pixels[ti * 4] = Math.round(val_r * iarr);
-      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
-      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
-      ti++;
-    }
-  }
-};
-
-const boxBlurT = (
-  pixels: Uint8ClampedArray,
-  w: number,
-  h: number,
-  r: number,
-) => {
-  const iarr = 1 / (r + r + 1);
-  for (let i = 0; i < w; i++) {
-    let ti = i,
-      li = ti,
-      ri = ti + r * w;
-    const fv = pixels[ti * 4],
-      fv1 = pixels[ti * 4 + 1],
-      fv2 = pixels[ti * 4 + 2];
-    const lv = pixels[(ti + w * (h - 1)) * 4],
-      lv1 = pixels[(ti + w * (h - 1)) * 4 + 1],
-      lv2 = pixels[(ti + w * (h - 1)) * 4 + 2];
-    let val_r = (r + 1) * fv,
-      val_g = (r + 1) * fv1,
-      val_b = (r + 1) * fv2;
-    for (let j = 0; j < r; j++) {
-      val_r += pixels[(ti + j * w) * 4];
-      val_g += pixels[(ti + j * w) * 4 + 1];
-      val_b += pixels[(ti + j * w) * 4 + 2];
-    }
-    for (let j = 0; j <= r; j++) {
-      val_r += pixels[ri * 4] - fv;
-      val_g += pixels[ri * 4 + 1] - fv1;
-      val_b += pixels[ri * 4 + 2] - fv2;
-      pixels[ti * 4] = Math.round(val_r * iarr);
-      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
-      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
-      ri += w;
-      ti += w;
-    }
-    for (let j = r + 1; j < h - r; j++) {
-      val_r += pixels[ri * 4] - pixels[li * 4];
-      val_g += pixels[ri * 4 + 1] - pixels[li * 4 + 1];
-      val_b += pixels[ri * 4 + 2] - pixels[li * 4 + 2];
-      pixels[ti * 4] = Math.round(val_r * iarr);
-      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
-      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
-      li += w;
-      ri += w;
-      ti += w;
-    }
-    for (let j = h - r; j < h; j++) {
-      val_r += lv - pixels[li * 4];
-      val_g += lv1 - pixels[li * 4 + 1];
-      val_b += lv2 - pixels[li * 4 + 2];
-      pixels[ti * 4] = Math.round(val_r * iarr);
-      pixels[ti * 4 + 1] = Math.round(val_g * iarr);
-      pixels[ti * 4 + 2] = Math.round(val_b * iarr);
-      li += w;
-      ti += w;
-    }
-  }
-};
-// -----------------------------------------------------------------------------
-
 // スタイル定義
 const CanvasContainer = styled("div")({
   position: "relative",
@@ -211,9 +71,11 @@ export default function Home() {
   const [isSaving, setIsSaving] = useState(false);
 
   const MAX_CANVAS_SIZE = 1200;
+  // ★重要: CSSのblur(15px)と同等の見た目にするため、高解像度画像用には大きめの値を設定
+  const [blurRadius, setBlurRadius] = useState(30);
 
   const [brushSize, setBrushSize] = useState(50);
-  const [blurStrength, setBlurStrength] = useState(1.0);
+  const [eraserOpacity, setEraserOpacity] = useState(1.0); // 変数名を分かりやすく変更（機能は同じ）
   const [previewPos, setPreviewPos] = useState({ x: 0, y: 0, visible: false });
   const [containerHeight, setContainerHeight] = useState<number | "auto">(
     "auto",
@@ -240,6 +102,9 @@ export default function Home() {
     reader.readAsDataURL(file);
   };
 
+  // -----------------------------------------------------------
+  // 画像読み込みと初期描画（ここを修正）
+  // -----------------------------------------------------------
   useEffect(() => {
     if (
       !imageSrc ||
@@ -255,6 +120,7 @@ export default function Home() {
       let width = img.width;
       let height = img.height;
 
+      // リサイズ処理
       if (width > height) {
         if (width > MAX_CANVAS_SIZE) {
           height = Math.round(height * (MAX_CANVAS_SIZE / width));
@@ -276,6 +142,7 @@ export default function Home() {
       bottomCanvas.width = width;
       bottomCanvas.height = height;
 
+      // 表示サイズ調整
       const containerWidth = containerRef.current!.clientWidth;
       const scale = containerWidth / width;
       const displayHeight = height * scale;
@@ -285,30 +152,38 @@ export default function Home() {
       const bottomCtx = bottomCanvas.getContext("2d");
 
       if (topCtx && bottomCtx) {
-        bottomCtx.drawImage(img, 0, 0, width, height);
-        bottomCanvas.style.filter = "blur(15px)";
+        // ▼▼ 修正ポイント ▼▼
+        // CSSフィルターではなく、Canvas自体にぼかしを描画します。
+        // これにより「見えている画像」と「保存される画像」のデータが一致します。
 
+        // 1. ボトム（ぼかし背景）の描画
+        bottomCtx.save();
+        bottomCtx.filter = `blur(${blurRadius}px)`; // 標準機能で高速・高品質なぼかし
+        // 余白が出ないよう少し拡大して描画するか、端の処理が必要ですが、
+        // 簡易的にそのまま描画します（端が少し薄くなる場合があります）
+        bottomCtx.drawImage(img, 0, 0, width, height);
+        bottomCtx.restore();
+
+        // ※CSSのfilterは削除または無効化
+        bottomCanvas.style.filter = "none";
+
+        // 2. トップ（元画像）の描画
         topCtx.globalCompositeOperation = "source-over";
         topCtx.drawImage(img, 0, 0, width, height);
       }
     };
-  }, [imageSrc]);
+  }, [imageSrc, blurRadius]); // blurRadiusが変わったら再描画
 
-  // ★追加機能: ブラシサイズ変更時にプレビューを中央に表示
+  // ブラシプレビュー表示
   useEffect(() => {
     if (!containerRef.current || !imageSrc) return;
-
     const rect = containerRef.current.getBoundingClientRect();
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-
-    setPreviewPos({ x: centerX, y: centerY, visible: true });
-
+    setPreviewPos({ x: rect.width / 2, y: rect.height / 2, visible: true });
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
     previewTimerRef.current = setTimeout(() => {
       setPreviewPos((prev) => ({ ...prev, visible: false }));
     }, 1500);
-  }, [brushSize, imageSrc]); // brushSizeが変わるたびに実行
+  }, [brushSize, imageSrc]);
 
   const getCoordinates = (e: React.PointerEvent) => {
     const canvas = topCanvasRef.current;
@@ -321,47 +196,36 @@ export default function Home() {
     return { x: x * scaleX, y: y * scaleY };
   };
 
-const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
-  e.preventDefault();
+  const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setIsDrawing(true);
 
-  // ★追加: タッチ操作の補足（指が少しずれても追従するようにする）
-  e.currentTarget.setPointerCapture(e.pointerId);
+    if (!topCanvasRef.current) return;
+    const ctx = topCanvasRef.current.getContext("2d");
+    if (!ctx) return;
 
-  setIsDrawing(true);
+    const { x, y } = getCoordinates(e);
+    const canvas = topCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scale = canvas.width / rect.width;
 
-  if (!topCanvasRef.current) return;
-  const ctx = topCanvasRef.current.getContext("2d");
-  if (!ctx) return;
+    // 「消しゴム」として機能させ、下のぼかしレイヤーを見せる
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.globalAlpha = eraserOpacity;
+    ctx.lineWidth = brushSize * scale;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
 
-  const { x, y } = getCoordinates(e);
+    ctx.beginPath();
+    ctx.arc(x, y, (brushSize * scale) / 2, 0, Math.PI * 2);
+    ctx.fill();
 
-  const canvas = topCanvasRef.current;
-  const rect = canvas.getBoundingClientRect();
-  const scale = canvas.width / rect.width;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
 
-  ctx.globalCompositeOperation = "destination-out";
-  ctx.globalAlpha = blurStrength;
-  ctx.lineWidth = brushSize * scale;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-
-  // ------------------------------------------------
-  // ★修正: タップ（点）の描画を「線」から「円の塗りつぶし」に変更
-  // スマホでは長さ0の stroke() が無視されることがあるため
-  // ------------------------------------------------
-  ctx.beginPath();
-  // ブラシサイズは直径なので、半径は / 2 します
-  ctx.arc(x, y, (brushSize * scale) / 2, 0, Math.PI * 2);
-  ctx.fill(); // stroke() ではなく fill() で確実に塗りつぶす
-
-  // ------------------------------------------------
-  // ドラッグ継続用のパス設定（ここからは線としてつなぐ）
-  // ------------------------------------------------
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-
-  setPreviewPos((prev) => ({ ...prev, visible: false }));
-};
+    setPreviewPos((prev) => ({ ...prev, visible: false }));
+  };
 
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
@@ -370,9 +234,6 @@ const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!ctx) return;
     const { x, y } = getCoordinates(e);
 
-    // 設定は startDrawing から引き継がれるが、念のため
-    // (beginPathがstartDrawingで呼ばれてstrokeされているので、
-    //  ここからは前回の地点から線をつなぐ)
     ctx.lineTo(x, y);
     ctx.stroke();
 
@@ -382,10 +243,9 @@ const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
 
   const stopDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    if (!isDrawing) return;
+    setIsDrawing(false);
     const ctx = topCanvasRef.current?.getContext("2d");
     if (ctx) ctx.beginPath();
-    setIsDrawing(false);
   };
 
   const handleContainerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -400,14 +260,19 @@ const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     }, 1500);
   };
 
+  // -----------------------------------------------------------
+  // ダウンロード処理（ここを修正）
+  // -----------------------------------------------------------
   const handleDownload = () => {
     if (!topCanvasRef.current || !bottomCanvasRef.current || !imageRef.current)
       return;
 
     setIsSaving(true);
 
+    // 少し待ってUIの反応を確保
     setTimeout(() => {
       const topCanvas = topCanvasRef.current!;
+      const bottomCanvas = bottomCanvasRef.current!;
       const width = topCanvas.width;
       const height = topCanvas.height;
 
@@ -421,12 +286,14 @@ const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
         return;
       }
 
-      ctx.drawImage(imageRef.current!, 0, 0, width, height);
+      // ▼▼ 修正ポイント ▼▼
+      // 再度ぼかし計算をする必要はありません。
+      // プレビューで見えている「既にぼやけたbottomCanvas」をそのまま使います。
 
-      // 高品質ぼかし計算
-      applyBlurProcessing(ctx, width, height, 20);
+      // 1. ぼかし済みの背景を描画
+      ctx.drawImage(bottomCanvas, 0, 0);
 
-      ctx.globalCompositeOperation = "source-over";
+      // 2. 穴あき加工された上のレイヤー（元画像）を重ねる
       ctx.drawImage(topCanvas, 0, 0);
 
       const dataUrl = outputCanvas.toDataURL("image/jpeg", 0.95);
@@ -443,7 +310,10 @@ const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!topCanvasRef.current || !imageRef.current) return;
     const ctx = topCanvasRef.current.getContext("2d");
     if (!ctx) return;
+
+    // トップキャンバス（鮮明な画像）をリセットして穴を埋める
     ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1.0; // reset alpha
     ctx.drawImage(
       imageRef.current,
       0,
@@ -498,10 +368,24 @@ const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
                   min={20}
                   max={150}
                 />
-                <Typography variant="caption">ぼかし濃度</Typography>
+
+                {/* 
+                  以前の「ぼかし濃度」は globalAlpha（透かし具合）でしたが、
+                  ユーザーの意図が「背景のぼけ具合」であればこちらを推奨します。
+                  両方実装しても良いですが、ここでは「背景のぼかし強度」スライダーを追加しています。
+                */}
+                <Typography variant="caption">ぼかし強度（背景）</Typography>
                 <Slider
-                  value={blurStrength}
-                  onChange={(_, v) => setBlurStrength(v as number)}
+                  value={blurRadius}
+                  onChange={(_, v) => setBlurRadius(v as number)}
+                  min={5}
+                  max={50} // 30-50くらいがCSSのblur(15px)に近い見た目になります
+                />
+
+                <Typography variant="caption">修正強度（透明度）</Typography>
+                <Slider
+                  value={eraserOpacity}
+                  onChange={(_, v) => setEraserOpacity(v as number)}
                   min={0.1}
                   max={1.0}
                   step={0.1}
@@ -578,7 +462,7 @@ const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
           <Stack alignItems="center" spacing={2}>
             <CircularProgress />
             {isSaving && (
-              <Typography variant="body2">高画質処理中...</Typography>
+              <Typography variant="body2">高画質保存中...</Typography>
             )}
           </Stack>
         </Box>
