@@ -208,7 +208,7 @@ export default function Home() {
   const MAX_CANVAS_SIZE = 1200;
 
   const [brushSize, setBrushSize] = useState(50);
-  const [blurRadius, setBlurRadius] = useState(15); // デフォルト値を少し下げておくと重ね塗りがしやすい
+  const [blurRadius, setBlurRadius] = useState(15);
 
   const [previewPos, setPreviewPos] = useState({ x: 0, y: 0, visible: false });
   const [containerHeight, setContainerHeight] = useState<number | "auto">(
@@ -216,9 +216,7 @@ export default function Home() {
   );
 
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
-  // 一時的な描画作業用のキャンバス（画面には出さない）
   const tempCanvasRef = useRef<HTMLCanvasElement | null>(null);
-
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const previewTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -238,9 +236,6 @@ export default function Home() {
     reader.readAsDataURL(file);
   };
 
-  // --------------------------------------------------------------------------
-  // ▼ 画像読み込み時の初期化
-  // --------------------------------------------------------------------------
   useEffect(() => {
     if (!imageSrc || !mainCanvasRef.current || !containerRef.current) return;
 
@@ -264,35 +259,26 @@ export default function Home() {
 
       imageRef.current = img;
 
-      // 1. メインキャンバスのセットアップ
       const mainCanvas = mainCanvasRef.current!;
       mainCanvas.width = width;
       mainCanvas.height = height;
 
-      // 2. 作業用Tempキャンバスのセットアップ（ブラシサイズ程度の小ささでもいいが、管理を楽にするため同じサイズに）
       if (!tempCanvasRef.current) {
         tempCanvasRef.current = document.createElement("canvas");
       }
       tempCanvasRef.current.width = width;
       tempCanvasRef.current.height = height;
 
-      // コンテナ高さの調整
       const containerWidth = containerRef.current!.clientWidth;
       const scale = containerWidth / width;
       setContainerHeight(height * scale);
 
       const mainCtx = mainCanvas.getContext("2d");
-
-      // 最初は元画像を描画
       if (mainCtx) {
         mainCtx.drawImage(img, 0, 0, width, height);
       }
     };
   }, [imageSrc]);
-
-  // --------------------------------------------------------------------------
-  // ▼ 描画ロジック（現在地をぼかして上書きする方式）
-  // --------------------------------------------------------------------------
 
   const getCoordinates = (e: React.PointerEvent) => {
     const canvas = mainCanvasRef.current;
@@ -316,25 +302,14 @@ export default function Home() {
     const rect = canvas.getBoundingClientRect();
     const scale = canvas.width / rect.width;
 
-    // ブラシの半径
     const r = (brushSize * scale) / 2;
-    // 処理範囲（ブラシ位置を中心とした正方形）
     const size = Math.ceil(r * 2);
-    // 描画開始位置（整数座標に丸める）
     const startX = Math.floor(x - r);
     const startY = Math.floor(y - r);
 
-    // 1. 現在のメインキャンバスから、ブラシ範囲の画像データを取得する
-    // ※ ここで「現在の見た目（既にぼけているかもしれない）」を取得するのがポイント
-    // ※ 画面外にはみ出るとエラーになる場合があるのでtry-catchまたは境界チェックが望ましいが、
-    //    getImageDataは範囲外を透明ピクセルとして返してくれるため通常は動く
     const currentImageData = mainCtx.getImageData(startX, startY, size, size);
-
-    // 2. 取得したデータに対して、さらにぼかし計算を行う (1+1=2)
     applyBlurToImageData(currentImageData, blurRadius);
 
-    // 3. ぼかしたデータを一時キャンバスに配置
-    //    (一時キャンバス全体をクリアしてから、必要な部分だけputする)
     tempCtx.clearRect(
       0,
       0,
@@ -343,16 +318,11 @@ export default function Home() {
     );
     tempCtx.putImageData(currentImageData, startX, startY);
 
-    // 4. メインキャンバスに円形で書き戻す
     mainCtx.save();
     mainCtx.beginPath();
     mainCtx.arc(x, y, r, 0, Math.PI * 2);
-    mainCtx.clip(); // 円形に切り抜く
-
-    // 一時キャンバスの内容をメインキャンバスに合成
-    // これにより、四角いImageDataを円形でペーストしたことになる
+    mainCtx.clip();
     mainCtx.drawImage(tempCanvasRef.current, 0, 0);
-
     mainCtx.restore();
   };
 
@@ -370,10 +340,6 @@ export default function Home() {
     e.preventDefault();
     if (!isDrawing) return;
     const { x, y } = getCoordinates(e);
-
-    // パフォーマンス対策: ドラッグ中は計算負荷が高いため、
-    // requestAnimationFrame等で制御するのが理想ですが、
-    // シンプル実装のためそのまま呼び出します。重い場合はイテレーションやサイズを調整してください。
     paintBlur(x, y);
   };
 
@@ -388,10 +354,31 @@ export default function Home() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     setPreviewPos({ x, y, visible: true });
+
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
     previewTimerRef.current = setTimeout(() => {
       setPreviewPos((prev) => ({ ...prev, visible: false }));
     }, 1500);
+  };
+
+  // ▼ 追加：スライダー操作時のプレビュー表示処理
+  const handleBrushSizeChange = (_: Event, newValue: number | number[]) => {
+    const newSize = newValue as number;
+    setBrushSize(newSize);
+
+    if (containerRef.current) {
+      // キャンバスの中央座標を計算
+      const width = containerRef.current.clientWidth;
+      const height = containerRef.current.clientHeight;
+
+      setPreviewPos({ x: width / 2, y: height / 2, visible: true });
+
+      // スライダー操作が終わってから1.5秒後にプレビューを非表示にする
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = setTimeout(() => {
+        setPreviewPos((prev) => ({ ...prev, visible: false }));
+      }, 1500);
+    }
   };
 
   const handleDownload = () => {
@@ -463,7 +450,7 @@ export default function Home() {
                 </Typography>
                 <Slider
                   value={brushSize}
-                  onChange={(_, v) => setBrushSize(v as number)}
+                  onChange={handleBrushSizeChange} // ← 変更箇所
                   min={20}
                   max={150}
                 />
