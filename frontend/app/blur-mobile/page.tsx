@@ -532,7 +532,15 @@ export default function Home() {
   };
 
   return (
-    <Container maxWidth="md" sx={{ py: 3, minHeight: "100vh" }}>
+    <Container
+      maxWidth="md"
+      sx={{
+        py: 3,
+        minHeight: "100vh",
+        bgcolor: "background.default", // 👈 追加: 画面の背景色をMUIのテーマ（白系）に固定
+        color: "text.primary", // 👈 追加: 基本の文字色もMUIのテーマに合わせる
+      }}
+    >
       {!imageSrc ? (
         // ▼ 初期画面：ドラッグ＆ドロップ対応エリア
         <Box
@@ -544,12 +552,11 @@ export default function Home() {
             flexDirection: "column",
             gap: 2,
             mb: 4,
-            p: 8,
-            border: isDragging ? "2px dashed #1976d2" : "2px dashed #ccc",
+            p: { xs: 4, sm: 8 }, // スマホでは少しパディングを小さく
+            border: "2px dashed",
+            borderColor: isDragging ? "primary.main" : "text.disabled", // 👈 変更: ダークモードでも見える色に
             borderRadius: 2,
-            backgroundColor: isDragging
-              ? "rgba(25, 118, 210, 0.04)"
-              : "transparent",
+            backgroundColor: isDragging ? "action.hover" : "background.paper", // 👈 変更: transparent をやめて背景色をつける
             transition: "all 0.2s ease",
             alignItems: "center",
           }}
